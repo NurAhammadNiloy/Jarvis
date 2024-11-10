@@ -21,7 +21,7 @@ def is_speech(data, sample_rate=16000, frame_duration_ms=30):
             return True
     return False
 
-def listen(timeout=15, phrase_time_limit=15, ambient_duration=1):
+def listen(timeout=30, phrase_time_limit=60, ambient_duration=1):
     """Listen continuously and process speech inputs."""
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source, duration=ambient_duration)
