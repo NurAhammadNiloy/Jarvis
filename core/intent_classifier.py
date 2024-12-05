@@ -15,5 +15,7 @@ def classify_intent(query):
         return "google"
     elif "status" in query:
         return "status"
+    elif "what you are doing" in query:
+        return "what you are doing"
     else:
         return "chat"

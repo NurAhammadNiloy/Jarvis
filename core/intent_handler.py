@@ -6,6 +6,7 @@ from core.youtube_service import search_youtube
 import webbrowser
 from datetime import datetime
 from core.intent_classifier import classify_intent
+import random
 
 def handle_query(query):
     intent = classify_intent(query)
@@ -68,6 +69,26 @@ def handle_query(query):
     elif intent == "status":
         synthesize_speech("All systems are fully operational, sir.")
         return True
+    elif intent == "thank":
+        responses = [
+        "You're welcome, boss. Always here to assist.",
+        "Of course, boss. Let me know if there's anything else.",
+        "No problem at all, boss. I'm happy to help.",
+        "Absolutely, boss. Your wish is my command.",
+        "As always, boss, it's my pleasure."
+        ]
+        synthesize_speech(random.choice(responses))
+        return True
+    
+    elif intent == "what you are doing":
+        responses = [
+         "Just here, ready to assist you, boss.",
+         "Monitoring the system. Let me know if you need anything.",
+         "Keeping an eye on things. What can I do for you?"
+        ]
+        synthesize_speech(random.choice(responses))
+        return True
+
 
     else:
         response = get_chatgpt_response(query)

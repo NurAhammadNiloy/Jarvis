@@ -8,7 +8,7 @@ import time
 import random
 from datetime import datetime
 
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_trf")
 
 class Assistant:
     def __init__(self):
