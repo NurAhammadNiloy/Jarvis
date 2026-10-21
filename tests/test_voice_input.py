@@ -59,9 +59,16 @@ def test_conflicting_important_hypotheses_require_clarification(primary, alterna
     assert ConfidenceGate(lambda: 0).assess(result).kind == 'clarify'
 
 
-@pytest.mark.parametrize('text', ["don't cancel the timer", 'do not play music', 'continue explaining', 'pause', 'delete'])
+@pytest.mark.parametrize('text', ["don't cancel the timer", 'pause', 'delete'])
 def test_legacy_router_cannot_act_on_negation_or_ambiguous_targets(text):
     assert ConfidenceGate(lambda: 0).assess(Recognition(text, 0.99)).kind == 'clarify'
+
+
+@pytest.mark.parametrize('text', ['do not play music', 'continue explaining'])
+def test_conversation_is_not_mistaken_for_an_action(text):
+    from core.intent_classifier import classify_intent
+    assert classify_intent(text) == 'chat'
+    assert ConfidenceGate(lambda: 0).assess(Recognition(text, 0.99)).kind == 'accept'
 
 
 @pytest.mark.parametrize('text', ['stop', 'quiet', 'Jarvis, stop', 'please stop'])

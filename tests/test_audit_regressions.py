@@ -6,6 +6,7 @@ import pytest
 
 from core.command_engine import execute_query
 from core.command_services import CommandServices
+from core.intent_classifier import route
 from core.smart_timer import SmartTimerManager, extract_timer_info
 
 NOW = lambda: datetime(2026, 10, 21, 10, 0)
@@ -32,13 +33,12 @@ def test_tomorrow_is_still_one_day_ahead(services):
 
 
 def test_unpause_the_pasta_timer_resumes():
-    info = extract_timer_info('unpause the pasta timer')
-    assert info['action'] == 'resume'
-    assert info['label'] == 'Pasta'
+    assert route('unpause the pasta timer').intent == 'resume_timer'
+    assert extract_timer_info('unpause the pasta timer')['label'] == 'Pasta'
 
 
 def test_pause_still_pauses():
-    assert extract_timer_info('pause the pasta timer')['action'] == 'pause'
+    assert route('pause the pasta timer').intent == 'pause_timer'
 
 
 class QuietTimers(SmartTimerManager):

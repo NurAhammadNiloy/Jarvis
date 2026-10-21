@@ -65,7 +65,7 @@ def test_local_responses_are_deterministic(services, query, expected):
 
 def test_understanding_does_not_execute_a_reminder(services):
     command = understand_query('remind me to call mom at 5pm', services)
-    assert command.intent == 'reminder'
+    assert command.intent == 'create_reminder'
     assert command.arguments['task'] == 'call mom'
     services.reminder.assert_not_called()
     assert execute_command(command, services).messages == ('Reminder set.',)

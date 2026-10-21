@@ -1,24 +1,30 @@
 """Plain-text understanding and execution, independent of speech delivery."""
 from datetime import datetime, timedelta
 import random
-import re
 
 from config.settings import DEFAULT_LOCATION
 from core.command_result import Command, CommandResult
 from core.command_services import CommandServices
-from core.intent_classifier import classify_intent
+from core.intent_classifier import route
 from core.service_errors import ServiceError
+
+# Timer intents and the action name CommandServices.timer_action expects.
+TIMER_ACTIONS = {
+    "start_timer": "set", "pause_timer": "pause", "resume_timer": "resume",
+    "cancel_timer": "cancel", "cancel_all_timers": "cancel_all",
+    "timer_status": "status", "add_timer_time": "add_time", "pomodoro": "pomodoro",
+}
 
 
 def understand_query(query, services, default_location=DEFAULT_LOCATION):
-    """Parse without executing actions. Existing parsing rules are preserved."""
-    intent = classify_intent(query)
-    lower = query.lower()
-    args = {}
-    if intent == "reminder":
+    """Parse without executing actions. Intent comes from the routing table."""
+    routed = route(query)
+    intent, lower = routed.intent, query.lower()
+    args = dict(routed.fields)
+    if intent == "create_reminder":
         args = services.extract_reminder_info(query)
-    elif "what are my reminders" in lower or "tell me my reminders" in lower:
-        intent = "list_reminders"
+    elif intent in TIMER_ACTIONS:
+        args = dict(services.extract_timer_info(query), action=TIMER_ACTIONS[intent])
     elif intent == "weather":
         detailed = any(k in lower for k in ["should i", "what should", "wear", "go out", "tell me about", "detailed", "full", "everything", "more"])
         context = None
@@ -28,26 +34,9 @@ def understand_query(query, services, default_location=DEFAULT_LOCATION):
             context = "clothing"
         elif any(k in lower for k in ["how cold", "how hot", "is it cold", "is it hot", "is it warm"]):
             context = "temperature"
-        city = default_location
-        if not context:
-            city = lower
-            for word in ["weather", "what is the", "what's the", "current", "now", "in", "at", "temperature", "outside", "how is the", "tell me", "the", "?"]:
-                city = city.replace(word, "")
-            city = city.strip() or default_location
-        args = {"city": city, "detailed": detailed, "question_context": context}
+        args = {"city": args["city"] or default_location, "detailed": detailed, "question_context": context}
     elif intent == "forecast":
-        city = lower
-        for word in ["forecast", "what's", "the", "what", "is", "weather", "for", "of", "about", "in", "tell", "me", "get", "show"]:
-            city = re.sub(r'\b' + word + r'\b', '', city)
-        args = {"city": ' '.join(re.sub(r'[?.,!]', '', city).split()) or default_location}
-    elif intent == "youtube" or "open a video" in lower or "show me a video" in lower:
-        intent = "youtube"
-        topic = lower
-        for word in ["play", "open", "show", "me", "a", "video", "about", "on", "youtube", "the", "song", "music"]:
-            topic = re.sub(r'\b' + word + r'\b', '', topic)
-        args = {"topic": ' '.join(topic.split()).strip()}
-    elif intent == "timer":
-        args = services.extract_timer_info(query)
+        args = {"city": args["city"] or default_location}
     return Command(intent, query, args)
 
 
@@ -68,7 +57,7 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         return reply(*action.messages, status="handled" if action.succeeded else "error",
                      legacy_handled=True)
 
-    if intent == "reminder":
+    if intent in ("reminder", "create_reminder"):
         task, time = args['task'], args['time']
         if task and time:
             return action_reply(services.reminder(task, time, args['recurring'], args['interval']))
@@ -108,9 +97,13 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         if not services.open_url("https://www.google.com"):
             return reply("I couldn't open your browser.", status="error")
         return reply("Opening Google.")
-    if intent == "timer":
+    if intent == "timer" or intent in TIMER_ACTIONS:
         action = args['action']
-        if action == "add_time" and not (args['duration'] and args['duration'][0]):
+        seconds = (args.get('duration') or (None, None))[0]
+        if action in ("set", "add_time") and seconds is not None and seconds <= 0:
+            return reply("A timer needs a duration greater than zero.", status="error",
+                         error="invalid_duration")
+        if action == "add_time" and not seconds:
             return reply("How much time would you like to add?")
         return action_reply(services.timer_action(action, query, args))
     if intent == "thank":
@@ -141,7 +134,7 @@ an error result does not imply rollback. Reuse services for active timer state.
         follow_up = services.follow_up(query)
         if follow_up:
             return CommandResult("handled", "follow_up", (follow_up,))
-        intent = classify_intent(query)
+        intent = route(query).intent
         command = understand_query(query, services)
         return execute_command(command, services, now=now, choose=choose)
     except ServiceError as exc:

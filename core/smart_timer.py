@@ -170,10 +170,13 @@ class SmartTimerManager:
         Advanced natural language duration parsing.
         Understands complex expressions like "a couple minutes", "half an hour".
         
-        Returns: (seconds, formatted_string) or (None, None)
+        Returns: (seconds, formatted_string), or (None, None) when no duration
+        is given. A zero or negative duration returns (seconds, None) so
+        callers can reject it rather than mistake it for a missing one.
         """
-        text_lower = text.lower().strip()
+        text_lower = _words_to_digits(text.lower().strip())
         total_seconds = 0
+        found = False
         
         # Handle special expressions first
         special_patterns = [
@@ -194,44 +197,30 @@ class SmartTimerManager:
         for pattern, seconds in special_patterns:
             if re.search(pattern, text_lower):
                 total_seconds += seconds
+                found = True
                 text_lower = re.sub(pattern, '', text_lower)
         
-        # Numeric patterns
+        # Numeric patterns (spelled-out numbers are already digits). A sign
+        # is kept only when it is not part of a range such as "2-3".
         numeric_patterns = [
-            (r'(\d+(?:\.\d+)?)\s*(?:hour|hr|h)s?', 3600),
-            (r'(\d+(?:\.\d+)?)\s*(?:minute|min|m)(?:ute)?s?(?!\s*s)', 60),
-            (r'(\d+(?:\.\d+)?)\s*(?:second|sec|s)(?:ond)?s?', 1),
+            (r'(?<![\w-])(-?\d+(?:\.\d+)?)\s*(?:hour|hr|h)s?', 3600),
+            (r'(?<![\w-])(-?\d+(?:\.\d+)?)\s*(?:minute|min|m)(?:ute)?s?(?!\s*s)', 60),
+            (r'(?<![\w-])(-?\d+(?:\.\d+)?)\s*(?:second|sec|s)(?:ond)?s?', 1),
         ]
-        
+
         for pattern, multiplier in numeric_patterns:
             matches = re.findall(pattern, text_lower)
             for match in matches:
                 try:
                     total_seconds += int(float(match) * multiplier)
+                    found = True
                 except (ValueError, TypeError):
                     pass
         
-        # Written numbers
-        written = {
-            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-            'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14,
-            'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
-            'nineteen': 19, 'twenty': 20, 'thirty': 30, 'forty': 40,
-            'fifty': 50, 'sixty': 60, 'ninety': 90
-        }
-        
-        for word, num in written.items():
-            if re.search(rf'\b{word}\b', text_lower):
-                if re.search(rf'{word}\s*(?:hour|hr)s?', text_lower):
-                    total_seconds += num * 3600
-                elif re.search(rf'{word}\s*(?:minute|min)s?', text_lower):
-                    total_seconds += num * 60
-                elif re.search(rf'{word}\s*(?:second|sec)s?', text_lower):
-                    total_seconds += num
-        
-        if total_seconds == 0:
+        if not found:
             return None, None
+        if total_seconds <= 0:
+            return total_seconds, None
         
         return total_seconds, cls._format_duration(total_seconds)
     
@@ -918,47 +907,40 @@ def start_pomodoro():
     _get_manager().start_pomodoro()
 
 
+_UNIT_WORDS = {
+    'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14,
+    'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
+    'nineteen': 19,
+}
+_TENS_WORDS = {
+    'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
+    'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90,
+}
+_NUMBER_WORDS = re.compile(
+    r'\b(?:(minus|negative)\s+)?(?:({tens})(?:[\s-]+({digits}))?|({units}))\b'.format(
+        tens='|'.join(_TENS_WORDS),
+        digits='one|two|three|four|five|six|seven|eight|nine',
+        units='|'.join(sorted(_UNIT_WORDS, key=len, reverse=True))))
+
+
+def _words_to_digits(text: str) -> str:
+    """'twenty five' -> '25', 'minus five' -> '-5', 'minus 5' -> '-5'."""
+    def number(match):
+        if match.group(2):
+            value = _TENS_WORDS[match.group(2)] + (_UNIT_WORDS[match.group(3)] if match.group(3) else 0)
+        else:
+            value = _UNIT_WORDS[match.group(4)]
+        return ('-' if match.group(1) else '') + str(value)
+    text = _NUMBER_WORDS.sub(number, text)
+    return re.sub(r'\b(?:minus|negative)\s+(?=\d)', '-', text)
+
+
 def extract_timer_info(text: str) -> dict:
-    """Extract timer information from natural language."""
+    """Timer label and duration from natural language. The action (start,
+    pause, ...) is decided by the intent router, not here."""
     return {
-        'action': _detect_timer_action(text),
         'label': SmartTimerManager._extract_label(text),
         'duration': SmartTimerManager.parse_duration(text)
     }
-
-
-def _detect_timer_action(text: str) -> str:
-    """Detect what timer action is requested."""
-    text_lower = text.lower()
-    
-    if any(w in text_lower for w in ['cancel', 'stop', 'delete', 'remove', 'clear']):
-        if 'all' in text_lower:
-            return 'cancel_all'
-        return 'cancel'
-    
-    # 'unpause' contains 'pause', so it must be matched first.
-    if 'unpause' in text_lower:
-        return 'resume'
-    
-    if any(w in text_lower for w in ['pause', 'hold', 'freeze']):
-        return 'pause'
-    
-    # Check for resume patterns - "start again" may have words in between
-    if any(w in text_lower for w in ['resume', 'continue', 'unpause']):
-        return 'resume'
-    if 'start' in text_lower and 'again' in text_lower:
-        return 'resume'
-    
-    if any(w in text_lower for w in ['status', 'remaining', 'left', 'how much', 'how long']):
-        return 'status'
-    
-    if any(w in text_lower for w in ['add', 'extend', 'more time', 'extra']):
-        return 'add_time'
-    
-    if 'pomodoro' in text_lower:
-        return 'pomodoro'
-    
-    if any(w in text_lower for w in ['set', 'start', 'create', 'timer for', 'remind']):
-        return 'set'
-    
-    return 'set'  # Default to setting a timer

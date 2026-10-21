@@ -14,10 +14,6 @@ from core.command_services import CommandServices
 
 DEFAULT = DEFAULT_LOCATION
 
-# Baseline only: the table is written before the router rewrite. Removed once
-# the new router lands.
-pytestmark = pytest.mark.xfail(reason='router rewrite pending', strict=False)
-
 
 class RoutingServices:
     """Only what understanding needs; timer parsing is the real pure parser."""
@@ -58,6 +54,8 @@ ROUTES = [
     ('snooze that reminder', 'snooze_reminder', {}),
     ('Snooze the reminder for 10 minutes', 'snooze_reminder', {}),
     ('snooze it', 'snooze_reminder', {}),
+    ('snooze the dentist reminder for 10 minutes', 'snooze_reminder', {'target': 'dentist'}),
+    ('Snooze the reminder for 10 minutes.', 'snooze_reminder', {'target': None}),
     ('remind me to call mom tomorrow at 9 pm', 'create_reminder', {}),
     ('Remind me at 5pm to stretch.', 'create_reminder', {}),
     ('set a reminder to call mom', 'create_reminder', {}),
@@ -105,6 +103,7 @@ ROUTES = [
     ("what's the weather like today?", 'weather', {'city': DEFAULT}),
     ('Weather?', 'weather', {'city': DEFAULT}),
     ('should I wear a jacket', 'weather', {'city': DEFAULT}),
+    ('what should I wear at the office', 'weather', {'city': DEFAULT}),
     ("what's the forecast for Helsinki", 'forecast', {'city': 'Helsinki'}),
     ('Forecast?', 'forecast', {'city': DEFAULT}),
     ('what will the weather be like this week in Athens', 'forecast', {'city': 'Athens'}),
@@ -114,6 +113,7 @@ ROUTES = [
     ('Play lofi music on YouTube.', 'youtube', {'topic': 'lofi music'}),
     ('can you play some jazz', 'youtube', {'topic': 'jazz'}),
     ('open youtube', 'youtube', {'topic': ''}),
+    ('Jarvis, can you play despacito please', 'youtube', {'topic': 'despacito'}),
     # --- browser, time, date, small talk
     ('open google', 'google', {}),
     ('Open Google.', 'google', {}),
@@ -138,6 +138,8 @@ ROUTES = [
     ("let's play a game", 'chat', {}),
     ('help me update my resume', 'chat', {}),
     ('explain gravity', 'chat', {}),
+    ('what time is it in Tokyo', 'chat', {}),
+    ('what is the temperature of the sun', 'chat', {}),
 ]
 
 
@@ -148,6 +150,25 @@ def test_routing_table(phrase, intent, fields):
     observed = observed_fields(command.arguments)
     for key, value in fields.items():
         assert observed.get(key) == value, (key, observed)
+
+
+def test_routing_needs_no_nlp_model():
+    import subprocess
+    import sys
+    from pathlib import Path
+    script = (
+        "import importlib.abc, sys\n"
+        "class Guard(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in {'spacy', 'torch', 'transformers', 'dateparser'} or name == 'utils.nlp_utils':\n"
+        "            raise AssertionError(name)\n"
+        "sys.meta_path.insert(0, Guard())\n"
+        "from core.intent_classifier import route\n"
+        f"for phrase in {[r[0] for r in ROUTES]!r}:\n"
+        "    route(phrase)\n")
+    completed = subprocess.run([sys.executable, '-B', '-c', script], cwd=Path(__file__).resolve().parents[1],
+                               capture_output=True, text=True, timeout=15)
+    assert completed.returncode == 0, completed.stderr
 
 
 def timer_services():
