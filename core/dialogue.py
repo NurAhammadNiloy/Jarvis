@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import time
 
 from core.voice_policy import words, alternatives_conflict, ConfidenceGate, Recognition
-from core.intent_classifier import classify_intent
+from core.intent_classifier import FAMILIES, route
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,9 @@ class Dialogue:
             if query is not None and (not isinstance(query, str) or not 0 < len(query) <= 400):
                 raise ValueError('Invalid proposal')
             if query is not None:
-                if classify_intent(query) not in {'reminder', 'timer', 'weather', 'forecast', 'time', 'date', 'youtube', 'google'}:
+                intent = route(query).intent
+                if (intent in {'delete_reminder', 'snooze_reminder'} or FAMILIES.get(intent, intent)
+                        not in {'reminder', 'timer', 'weather', 'forecast', 'time', 'date', 'youtube', 'google'}):
                     raise ValueError('Unsupported proposal')
                 if ConfidenceGate(self.clock).assess(Recognition(query, 1.0)).kind != 'accept':
                     raise ValueError('Unsafe proposal')

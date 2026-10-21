@@ -10,6 +10,7 @@ import pytest
 
 from config.settings import DEFAULT_LOCATION
 from core.command_engine import execute_query, understand_query
+from core.command_result import ActionResult
 from core.command_services import CommandServices
 
 DEFAULT = DEFAULT_LOCATION
@@ -190,3 +191,73 @@ def test_non_positive_durations_are_rejected_without_a_timer(phrase):
     assert result.status == 'error'
     assert len(result.messages) == 1 and 'zero' in result.messages[0]
     services.timer_action.assert_not_called()
+
+
+def action_services():
+    fake = timer_services()
+    fake.list_reminders.return_value = ActionResult(('Active reminder: dentist at 2026-10-22 09:00:00',))
+    return fake
+
+
+def test_list_reminders_uses_the_reminder_listing():
+    services = action_services()
+    result = execute_query('what are my reminders', services)
+    services.list_reminders.assert_called_once_with()
+    assert result.status == 'handled'
+    assert result.messages == ('Active reminder: dentist at 2026-10-22 09:00:00',)
+    services.reminder.assert_not_called()
+
+
+@pytest.mark.parametrize('phrase, intent', [
+    ('delete my dentist reminder', 'delete_reminder'),
+    ('snooze that reminder', 'snooze_reminder'),
+    ('set an alarm for 7am', 'alarm'),
+])
+def test_unsupported_operations_say_so_and_do_nothing(phrase, intent):
+    services = action_services()
+    result = execute_query(phrase, services)
+    assert (result.status, result.intent, result.messages) == ('error', intent, ("I can't do that yet.",))
+    assert result.legacy_value() is False
+    for method in ('reminder', 'list_reminders', 'timer_action', 'chat'):
+        getattr(services, method).assert_not_called()
+
+
+def test_twenty_five_minute_timer_runs_for_twenty_five_minutes(tmp_path, monkeypatch):
+    from core.smart_timer import SmartTimerManager
+
+    class QuietTimers(SmartTimerManager):
+        def _start_timer_thread(self, timer):
+            pass
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'data').mkdir()
+    services = CommandServices(notifications=Mock())
+    services._timers = QuietTimers(notifications=Mock())
+    result = execute_query('set a timer for twenty five minutes', services)
+    assert result.status == 'handled'
+    [timer] = services._timers.timers.values()
+    assert timer.duration_seconds == 1500
+
+
+def test_youtube_api_failure_is_an_error():
+    from unittest.mock import patch
+    from core import youtube_service
+    from core.service_errors import ServiceError
+    client = Mock()
+    client.search.return_value.list.return_value.execute.side_effect = RuntimeError('quota exceeded')
+    with patch.object(youtube_service, 'youtube', client):
+        with pytest.raises(ServiceError):
+            youtube_service.search_youtube('lofi')
+    services = action_services()
+    services.youtube.side_effect = ServiceError("I couldn't reach YouTube right now. Please try again later.")
+    result = execute_query('play lofi music on youtube', services)
+    assert result.status == 'error'
+    services.open_url.assert_not_called()
+
+
+def test_youtube_with_no_results_is_not_reported_as_handled():
+    services = action_services()
+    services.youtube.return_value = None
+    result = execute_query('play lofi music on youtube', services)
+    assert result.status == 'error'
+    assert result.messages == ("I couldn't find lofi music on YouTube.",)

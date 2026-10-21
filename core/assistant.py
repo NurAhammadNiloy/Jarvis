@@ -7,7 +7,7 @@ from core.command_output import VoiceNotifications, deliver_result
 from core.command_services import CommandServices
 from core.voice_policy import ConfidenceGate, strip_wake_word, words
 from core.conversation_log import record
-from core.intent_classifier import classify_intent
+from core.intent_classifier import route
 
 
 class Assistant:
@@ -85,7 +85,9 @@ class Assistant:
         decision = self.gate.assess(recognition, text=text,
                                     force_important=self.pending_reminder is not None)
         if self.dialogue is not None and decision.kind != 'stop' and not recognition.error and not recognition.truncated and text:
-            if self.dialogue.repairing or decision.kind == 'clarify' or classify_intent(text) in {'chat', 'reminder'}:
+            # Only new reminders need the dialogue's confirmation; list, delete
+            # and snooze run (or refuse) directly.
+            if self.dialogue.repairing or decision.kind == 'clarify' or route(text).intent in {'chat', 'create_reminder'}:
                 from dataclasses import replace
                 turn = self.dialogue.turn(replace(recognition, text=text), reason=(
                     decision.prompt if decision.kind == 'clarify' else 'conversation'))

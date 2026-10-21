@@ -8,6 +8,9 @@ from core.command_services import CommandServices
 from core.intent_classifier import route
 from core.service_errors import ServiceError
 
+# Routed so they never fall through to chat, but there is no backend yet.
+UNSUPPORTED = ("delete_reminder", "snooze_reminder", "alarm")
+
 # Timer intents and the action name CommandServices.timer_action expects.
 TIMER_ACTIONS = {
     "start_timer": "set", "pause_timer": "pause", "resume_timer": "resume",
@@ -67,6 +70,8 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         return reply("I couldn't understand the reminder. Please try again with a task and time.", status="error")
     if intent == "list_reminders":
         return action_reply(services.list_reminders())
+    if intent in UNSUPPORTED:
+        return reply("I can't do that yet.", status="error", error="unsupported")
     if intent in ("weather", "forecast"):
         if not args['city']:
             return reply("I couldn't determine your location. Please tell me the city for the weather update.")
@@ -80,7 +85,8 @@ boundary. Clock and response choice can be fixed for deterministic tests.
             if not services.open_url(url):
                 return reply("I found the video but couldn't open your browser.", status="error")
             return reply(f"Playing {topic} on YouTube." if topic else "Opening YouTube.")
-        return reply(f"I couldn't find {topic} on YouTube." if topic else "Couldn't find that video.")
+        return reply(f"I couldn't find {topic} on YouTube." if topic else "Couldn't find that video.",
+                     status="error")
     if intent == "time":
         return reply(f"The current time is {now().strftime('%I:%M %p')}.")
     if intent == "date":

@@ -53,7 +53,9 @@ def test_cancel_and_expiration_invalidate_proposal():
 
 
 @pytest.mark.parametrize('response', [None, {'reply': 'done', 'query': 'delete all files'},
-    {'reply': 'done', 'query': "don't cancel all timers"}])
+    {'reply': 'done', 'query': "don't cancel all timers"},
+    {'reply': 'done', 'query': 'delete my dentist reminder'},
+    {'reply': 'done', 'query': 'set an alarm for 7am'}])
 def test_malformed_or_unsafe_model_proposals_cannot_execute(response):
     dialogue = Dialogue(Mock(return_value=response), clock=lambda: 0)
     assert not dialogue.turn(Recognition('something', .9)).query
@@ -89,3 +91,16 @@ def test_assistant_routes_confirmed_repair_through_existing_boundary():
     assistant.process_recognition(Recognition('yes', .95))
     services.reminder.assert_called_once()
     assert any(h['text'] == 'Reminder set.' for h in assistant.dialogue.history)
+
+
+@pytest.mark.parametrize('text', ['delete my dentist reminder', 'snooze that reminder'])
+def test_unsupported_reminder_operations_are_refused_without_the_model(text):
+    resolver = Mock()
+    services = Mock(spec=CommandServices)
+    services.follow_up.return_value = None
+    output = Mock()
+    assistant = Assistant(Mock(), Mock(), services, output, clock=lambda: 0,
+        dialogue=Dialogue(resolver, clock=lambda: 0))
+    assistant.process_recognition(Recognition(text, .95))
+    resolver.assert_not_called()
+    output.assert_called_once_with("I can't do that yet.")

@@ -31,4 +31,4 @@ def search_youtube(query):
         raise ServiceError("YouTube took too long to respond. Please try again.")
     except Exception as e:
         print(f"Error with YouTube API: {e}")
-        return None
+        raise ServiceError("I couldn't reach YouTube right now. Please try again later.")
