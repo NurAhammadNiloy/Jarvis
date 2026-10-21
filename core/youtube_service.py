@@ -7,13 +7,17 @@ def search_youtube(query):
     try:
         request = youtube.search().list(
             part="snippet",
-            maxResults=1,
-            q=query
+            maxResults=5,
+            q=query,
+            type="video"  # Only return videos, not channels/playlists
         )
         response = request.execute()
         if response['items']:
-            video_url = f"https://www.youtube.com/watch?v={response['items'][0]['id']['videoId']}"
-            return video_url
+            for item in response['items']:
+                if 'id' in item and 'videoId' in item['id']:
+                    video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
+                    return video_url
+            return None
         else:
             return None
     except Exception as e:
