@@ -53,7 +53,6 @@ def services():
     ("what is today's date", "Today's date is September 09, 2026."),
     ("what is tomorrow's date", "Tomorrow's date is September 10, 2026."),
     ("what was yesterday's date", "Yesterday's date was September 08, 2026."),
-    ('status', 'All systems are fully operational, sir.'),
     ('what you are doing', 'Just here, ready to assist you, boss.'),
     ('thank you', 'You are welcome.'),
 ])
@@ -197,7 +196,7 @@ from core.intent_handler import handle_query
 assert execute_query('time', now=lambda:datetime(2026,9,9,14,30)).messages == ('The current time is 02:30 PM.',)
 assert execute_query('timer status').messages == ('You have no active timers.',)
 messages=[]
-assert handle_query('status', output=messages.append) is True
+assert handle_query('what time is it', output=messages.append) is True
 assert len(messages)==1
 '''
     completed = subprocess.run([sys.executable, '-B', '-S', '-c', script], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=15)

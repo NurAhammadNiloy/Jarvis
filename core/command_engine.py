@@ -88,25 +88,26 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         url = services.youtube(query)
         topic = args['topic']
         if url:
-            services.open_url(url)
+            if not services.open_url(url):
+                return reply("I found the video but couldn't open your browser.", status="error")
             return reply(f"Playing {topic} on YouTube." if topic else "Opening YouTube.")
         return reply(f"I couldn't find {topic} on YouTube." if topic else "Couldn't find that video.")
     if intent == "time":
         return reply(f"The current time is {now().strftime('%I:%M %p')}.")
     if intent == "date":
         lower = query.lower()
+        # "day after tomorrow" contains "tomorrow", so it must be checked first.
+        if "day after tomorrow" in lower:
+            return reply(f"The day after tomorrow is {(now() + timedelta(days=2)).strftime('%B %d, %Y')}.")
         if "tomorrow" in lower:
             return reply(f"Tomorrow's date is {(now() + timedelta(days=1)).strftime('%B %d, %Y')}.")
         if "yesterday" in lower:
             return reply(f"Yesterday's date was {(now() - timedelta(days=1)).strftime('%B %d, %Y')}.")
-        if "day after tomorrow" in lower:
-            return reply(f"The day after tomorrow is {(now() + timedelta(days=2)).strftime('%B %d, %Y')}.")
         return reply(f"Today's date is {now().strftime('%B %d, %Y')}.")
     if intent == "google":
-        services.open_url("https://www.google.com")
+        if not services.open_url("https://www.google.com"):
+            return reply("I couldn't open your browser.", status="error")
         return reply("Opening Google.")
-    if intent == "status":
-        return reply("All systems are fully operational, sir.")
     if intent == "timer":
         action = args['action']
         if action == "add_time" and not (args['duration'] and args['duration'][0]):

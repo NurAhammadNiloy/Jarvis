@@ -610,7 +610,12 @@ class SmartTimerManager:
         """Pause a running timer."""
         timer = self._find_timer(timer_id, label)
         
-        # If no timer found by label, try to find the only active timer
+        if not timer and (timer_id or label):
+            # A specific timer was requested: never act on a different one.
+            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            return False
+
+        # No timer was named: use the only running timer, if there is one
         if not timer:
             with self._lock:
                 running_timers = [t for t in self.timers.values() if t.state == TimerState.RUNNING]
@@ -644,7 +649,12 @@ class SmartTimerManager:
         """Resume a paused timer."""
         timer = self._find_timer(timer_id, label)
         
-        # If no timer found by label, try to find the only paused timer
+        if not timer and (timer_id or label):
+            # A specific timer was requested: never act on a different one.
+            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            return False
+
+        # No timer was named: use the only paused timer, if there is one
         if not timer:
             with self._lock:
                 paused_timers = [t for t in self.timers.values() if t.state == TimerState.PAUSED]
@@ -680,8 +690,13 @@ class SmartTimerManager:
         """Cancel a timer."""
         timer = self._find_timer(timer_id, label)
         
+        if not timer and (timer_id or label):
+            # A specific timer was requested: never act on a different one.
+            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            return False
+
         if not timer:
-            # If only one timer, cancel it
+            # No timer was named: cancel the only one, if there is one
             with self._lock:
                 if len(self.timers) == 1:
                     timer = list(self.timers.values())[0]
@@ -794,6 +809,11 @@ class SmartTimerManager:
         """Add time to an existing timer."""
         timer = self._find_timer(timer_id, label)
         
+        if not timer and (timer_id or label):
+            # A specific timer was requested: never act on a different one.
+            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            return False
+
         if not timer:
             with self._lock:
                 if len(self.timers) == 1:
@@ -915,6 +935,10 @@ def _detect_timer_action(text: str) -> str:
         if 'all' in text_lower:
             return 'cancel_all'
         return 'cancel'
+    
+    # 'unpause' contains 'pause', so it must be matched first.
+    if 'unpause' in text_lower:
+        return 'resume'
     
     if any(w in text_lower for w in ['pause', 'hold', 'freeze']):
         return 'pause'
