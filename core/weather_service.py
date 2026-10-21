@@ -2,10 +2,12 @@ import requests
 import geocoder
 from datetime import datetime
 from config.api_keys import WEATHER_API_KEY, GOOGLE_API_KEY
+from config.settings import NETWORK_TIMEOUT_SECONDS
+from core.service_errors import ServiceError
 
 def get_user_location():
     try:
-        g = geocoder.ip('me')
+        g = geocoder.ip('me', timeout=NETWORK_TIMEOUT_SECONDS)
         if g.ok and g.city:
             return g.city
         else:
@@ -16,7 +18,7 @@ def get_user_location():
 def get_precise_location():
     url = f'https://www.googleapis.com/geolocation/v1/geolocate?key={GOOGLE_API_KEY}'
     try:
-        response = requests.post(url, json={})
+        response = requests.post(url, json={}, timeout=NETWORK_TIMEOUT_SECONDS)
         if response.status_code == 200:
             location_data = response.json()
             latitude = location_data['location']['lat']
@@ -33,7 +35,7 @@ def get_city_from_coordinates(lat, lon):
         "User-Agent": "JarvisAssistant/1.0"
     }
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=NETWORK_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             city = data.get("address", {}).get("city", "")
@@ -180,7 +182,7 @@ def get_weather(city, detailed=False, question_context=None):
     }
 
     try:
-        response = requests.get(base_url, params=params)
+        response = requests.get(base_url, params=params, timeout=NETWORK_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             
@@ -305,13 +307,15 @@ def get_weather(city, detailed=False, question_context=None):
             return " ".join(parts)
 
         elif response.status_code == 404:
-            return f"I couldn't find weather data for {city}. Could you check the spelling?"
+            raise ServiceError(f"I couldn't find weather data for {city}. Could you check the spelling?")
         elif response.status_code == 401:
-            return "There's an issue with the weather service authentication. Please check the API key."
+            raise ServiceError("There's an issue with the weather service authentication. Please check the API key.")
         else:
-            return f"I encountered an issue getting the weather: {response.status_code}. Let me try again later."
-    except requests.exceptions.RequestException as e:
-        return "I'm having trouble connecting to the weather service right now. Please try again in a moment."
+            raise ServiceError(f"I encountered an issue getting the weather: {response.status_code}. Let me try again later.")
+    except requests.exceptions.Timeout:
+        raise ServiceError("The weather service took too long to respond. Please try again.")
+    except requests.exceptions.RequestException:
+        raise ServiceError("I'm having trouble connecting to the weather service right now. Please try again in a moment.")
 
 def get_forecast(city, days=3):
     """Get weather forecast for upcoming days."""
@@ -324,7 +328,7 @@ def get_forecast(city, days=3):
     }
     
     try:
-        response = requests.get(base_url, params=params)
+        response = requests.get(base_url, params=params, timeout=NETWORK_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             
@@ -346,7 +350,7 @@ def get_forecast(city, days=3):
             days_list = list(daily_data.items())[:days]
             
             if not days_list:
-                return f"I couldn't get forecast data for {city}."
+                raise ServiceError(f"I couldn't get forecast data for {city}.")
             
             parts = [f"Sir, here's the outlook for {city}."]
             
@@ -407,20 +411,19 @@ def get_forecast(city, days=3):
             
             return " ".join(parts)
         else:
-            return f"I couldn't get the forecast for {city}, sir."
+            raise ServiceError(f"I couldn't get the forecast for {city}, sir.")
+    except requests.exceptions.Timeout:
+        raise ServiceError("The weather service took too long to respond. Please try again.")
     except requests.exceptions.RequestException:
-        return "I'm having trouble getting the forecast right now, sir."
+        raise ServiceError("I'm having trouble getting the forecast right now, sir.")
 
 def compare_weather(city1, city2):
     """Compare weather between two cities."""
-    weather1 = get_weather(city1)
-    weather2 = get_weather(city2)
-    
     # Get raw data for comparison
     base_url = "http://api.openweathermap.org/data/2.5/weather"
     try:
-        data1 = requests.get(base_url, params={"q": city1, "appid": WEATHER_API_KEY, "units": "metric"}).json()
-        data2 = requests.get(base_url, params={"q": city2, "appid": WEATHER_API_KEY, "units": "metric"}).json()
+        data1 = requests.get(base_url, params={"q": city1, "appid": WEATHER_API_KEY, "units": "metric"}, timeout=NETWORK_TIMEOUT_SECONDS).json()
+        data2 = requests.get(base_url, params={"q": city2, "appid": WEATHER_API_KEY, "units": "metric"}, timeout=NETWORK_TIMEOUT_SECONDS).json()
         
         temp1 = data1["main"]["temp"]
         temp2 = data2["main"]["temp"]

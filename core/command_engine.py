@@ -7,6 +7,7 @@ from config.settings import DEFAULT_LOCATION
 from core.command_result import Command, CommandResult
 from core.command_services import CommandServices
 from core.intent_classifier import classify_intent
+from core.service_errors import ServiceError
 
 
 def understand_query(query, services, default_location=DEFAULT_LOCATION):
@@ -142,6 +143,9 @@ an error result does not imply rollback. Reuse services for active timer state.
         intent = classify_intent(query)
         command = understand_query(query, services)
         return execute_command(command, services, now=now, choose=choose)
+    except ServiceError as exc:
+        # A provider failed or timed out; its message is written to be spoken.
+        return CommandResult("error", intent, (str(exc),), error="ServiceError")
     except Exception as exc:
         return CommandResult("error", intent,
                              ("I'm sorry, I couldn't complete that command.",),

@@ -1,5 +1,7 @@
 import openai
 from config.api_keys import OPENAI_API_KEY
+from config.settings import NETWORK_TIMEOUT_SECONDS
+from core.service_errors import ServiceError
 
 openai.api_key = OPENAI_API_KEY
 
@@ -71,7 +73,8 @@ def get_chatgpt_response(query: str) -> str:
             model="gpt-4o",
             messages=messages,
             temperature=0.3,
-            max_tokens=150  # Increased slightly for better answers
+            max_tokens=150,  # Increased slightly for better answers
+            request_timeout=NETWORK_TIMEOUT_SECONDS
         )
         
         assistant_response = response['choices'][0]['message']['content']
@@ -82,6 +85,9 @@ def get_chatgpt_response(query: str) -> str:
         
         return assistant_response
         
+    except openai.error.Timeout as e:
+        print(f"Error with ChatGPT: {e}")
+        raise ServiceError("ChatGPT took too long to respond. Please try again.")
     except Exception as e:
         print(f"Error with ChatGPT: {e}")
-        return "I'm sorry, I couldn't get a response from ChatGPT."
+        raise ServiceError("I'm sorry, I couldn't get a response from ChatGPT.")
