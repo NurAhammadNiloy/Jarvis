@@ -18,8 +18,8 @@ class GoogleSynthesizer:
                  speaking_rate=1.1, pitch=0.0):
         from google.cloud import texttospeech
         if self.client is None:
-            from config.credentials import credentials
-            self.client = texttospeech.TextToSpeechClient(credentials=credentials)
+            from config.credentials import get_credentials
+            self.client = texttospeech.TextToSpeechClient(credentials=get_credentials())
         response = self.client.synthesize_speech(
             input=texttospeech.SynthesisInput(ssml=create_dynamic_ssml(text)),
             voice=texttospeech.VoiceSelectionParams(language_code=language_code, name=voice_name),
