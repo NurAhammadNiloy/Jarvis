@@ -91,3 +91,44 @@ it]`, …), so this column is my reading of the log. Please correct it.
 | 4. Answers to "Shall I do that?" | "yes" (0.56) rejected; "yes do it" (0.86) not taken as yes; "yes please" (0.87) rejected; "yes please" (0.89) rejected | Heard correctly every time, and never accepted |
 | 5. Before the 6:30 alarm question | Turn 26 "wake up at 6:30" (0.20; alternative "wake up") | Probably "wake me up at 6:30" or similar |
 | 6. Before the YouTube question | Turn 27 "videos of 10 minutes" (0.13) from 22.4 s of audio; then turn 28 "set an alarm for 6:30 a.m." (0.88) rejected | Probably a repeat of the alarm request, overlapping Jarvis's question |
+
+## Diagnosis
+
+| Problem (turns) | Root cause | Category |
+|---|---|---|
+| Correct answers thrown away (12, 14, 16, 21) | Jarvis's own voice, played through the speakers, opens the microphone's voice detector before Jarvis finishes. Your answer then becomes part of an utterance that *started* during playback. The whole utterance is tagged as overlapping playback, and `voice_runtime.handle_final` discards tagged utterances unless they start with "Jarvis". You spoke after Jarvis had stopped, but that wasn't considered. | Confirmation handling / echo filter |
+| Delete confirmation asked 3 times (13→15→20) | (a) "yes" and both "yes please" were discarded by the filter above. (b) "yes do it" reached the dialogue, but it only accepted exactly "yes", "yes please" or "confirm", so "yes do it" went back to ChatGPT, which proposed the same thing again. (c) Even a matching "yes" needed confidence ≥ 0.8 with no differing alternatives: "yes" at 0.56 (all alternatives "yesss"/"yess") and "yes do it" (alternative "just do it") would both have been refused. | Confirmation handling + threshold |
+| "delete reminder" went through the ChatGPT proposal path (13, 20) | The router classified it correctly (`delete_reminder`), but the assistant sends *everything* to the dialogue while `dialogue.repairing` is set. The low-confidence "definition" turn (11) set it, and it stays set until "yes", "cancel" or 2 minutes of silence. So a clear, confident command was handled as a repair. | Routing (state, not the rule table) |
+| The proposal would not have deleted anything | ChatGPT phrased it as `delete reminder 'call Mom'`; the target extractor doesn't read quoted names, so the target was empty. Also, no "call mom" reminder was pending: both January ones were announced as missed at startup (09:49) and marked done. | Routing (target extraction) |
+| "Would you like to set an alarm for 6:30 AM?" could not be confirmed | ChatGPT asked a yes/no question in free text instead of returning a proposal. With nothing pending, the dialogue answers any "yes" with "What would you like me to do?". | Confirmation handling |
+| "wake up at 6:30" not routed as an alarm (26) | The alarm rule only knows "wake me". At 0.20 confidence it went to ChatGPT anyway; a confident "wake up at 6:30" would have gone to chat. | Routing (rule gap) |
+| "set an alarm for 6:30 a.m." discarded (28) | You spoke while Jarvis was still asking its question, without saying "Jarvis". Without echo cancellation this can't be told apart from Jarvis hearing itself, so it stays discarded (see recommendations). | Echo / barge-in |
+| Request lost after waking (9–11) | 7.4 s of audio came back unrecognized, then a fragment was heard as "definition" (0.08). The long utterance mixes your words with noise and speaker echo. | Misrecognition |
+| Low-confidence transcripts (6, 11, 26, 27) and 18 of 31 utterances unrecognized | Long, mixed utterances: the voice detector stays open on speaker echo and background sound (11 utterances > 5 s; a "yes" became 7 s of audio). Google then gets your words buried in Jarvis's own voice or noise. | Misrecognition (audio front end) |
+| 6.0 s and 17.9 s of silence before a reply (8, 26) | A finished reply waits until the microphone reports no speech. The voice detector stayed "active" for 6 s and 18 s, so the reply was held with no upper limit. | Latency |
+
+### Where the time goes
+
+The single slowest stage is the **reply being held for "input"**: 24.9 s across
+3 turns, 17.9 s at worst, against 8.0 s for all ChatGPT calls together.
+
+On a normal turn, after you stop speaking:
+
+| Stage | Typical time |
+|---|---|
+| Endpoint silence | 1.4 s |
+| Recognition | ~0.8 s (up to 2.3 s for long, noisy utterances) |
+| ChatGPT dialogue (when used) | ~1.2 s (up to 2.2 s) |
+| Synthesis | ~0.5 s |
+| **Total** | about 3–4.5 s on the dialogue path; about 2.7 s on the fast path |
+
+On the fast path, routing and execution take milliseconds. So the dialogue
+detour on turns 13 and 20 cost about 1 s each, plus an extra confirmation
+round trip.
+
+Misrecognition is a real but secondary problem. Every clearly spoken command
+and answer in this session was recognized correctly (0.56–0.95). What failed
+was what happened *after* recognition: discarded answers, a too-strict "yes"
+and a sticky repair state. The recognition failures (unrecognized audio, 0.06–0.20 transcripts)
+trace back to long utterances mixed with speaker echo, i.e. the audio front
+end, more than to the speech model.
