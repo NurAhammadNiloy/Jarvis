@@ -157,3 +157,34 @@ def test_training_tool_explains_when_nothing_is_recorded(tmp_path, monkeypatch, 
     monkeypatch.setattr('sys.argv', ['train_wake_verifier.py'])
     assert train.main() == 1
     assert 'record_voice.py' in capsys.readouterr().out
+
+
+# --- microphone health -------------------------------------------------------------------------
+
+def test_audio_levels_measure_noise_floor_and_clipping():
+    from core.wake_word import audio_levels, level_warnings
+    rng = np.random.default_rng(0)
+    hiss = rng.normal(0, 30, 16000).astype(np.int16)                  # about -61 dBFS
+    assert audio_levels(hiss)['noise_floor_db'] == pytest.approx(-61, abs=1.5)
+    assert audio_levels(hiss)['clipped'] == 0 and level_warnings(audio_levels(hiss)) == []
+    clipped = np.concatenate([hiss, np.full(100, -32768, np.int16)])
+    assert audio_levels(clipped)['clipped'] == 100 and audio_levels(clipped)['peak_db'] == 0.0
+    noisy = rng.normal(0, 600, 16000).astype(np.int16)                # about -35 dBFS
+    assert 'noise floor' in level_warnings(audio_levels(noisy))[0]
+    assert audio_levels(np.zeros(0, np.int16))['clipped'] == 0
+
+
+def test_check_reports_noise_and_clipping_per_part(tmp_path):
+    rng = np.random.default_rng(0)
+    quiet = rng.normal(0, 30, 48000).astype(np.int16)
+    record.write_wav(tmp_path / 'wake' / 'hey_jarvis_001.wav', quiet.tobytes())
+    loud = quiet.copy()
+    loud[1000:1050] = 32767
+    record.write_wav(tmp_path / 'wake' / 'hey_jarvis_002.wav', loud.tobytes())
+    record.write_wav(tmp_path / 'speech' / 'speech_001.wav', rng.normal(0, 600, 48000).astype(np.int16).tobytes())
+    lines = record.check(tmp_path)
+    assert lines[0].startswith('wake: 2 clips, noise floor -61 dBFS') and lines[0].endswith('clipped in 1: hey_jarvis_002.wav')
+    assert '--only wake --fresh' in lines[1]
+    assert lines[2].startswith('speech: 1 clips') and 'noise floor is high' in lines[3]
+    assert lines[4:] == ['background: no recordings', 'commands: no recordings']
+    assert 'CLIPPED (50 samples)' in record.clip_note(loud.tobytes()) and record.clip_note(quiet.tobytes()) == ''

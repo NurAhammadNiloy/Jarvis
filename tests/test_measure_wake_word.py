@@ -85,3 +85,88 @@ def test_verdict_needs_nine_of_ten_and_quiet_background():
     assert '  verdict: not there yet' in noisy and noisy[-1].startswith('  advice: Background reached')
     weak = measure.summary('Plain model', ([], 0.05), HEY_JARVIS, 0.5)
     assert weak[2] == '  detected: 6 of 10 (misses peaked at 0.08, 0.49, 0.39, 0.49)'
+
+
+# --- background peaks and the microphone check ---------------------------------------------
+
+def test_a_score_from_before_the_window_does_not_count_in_it():
+    # The warm-up ended on 0.9; the background window's own frames only reach 0.1.
+    detector = Detector([0.1, 0.1])
+    detector.last_score = 0.9
+
+    class Idle(Detector):  # no new 80 ms chunk yet in the first frames of the window
+        def process(self, frame):
+            return None
+    idle = Idle([])
+    idle.last_score = 0.9
+    [(_, peak), (_, idle_peak)] = measure.listen(Frames(2), [detector, idle], 1, clock=Clock())
+    assert peak == 0.1 and idle_peak == 0.0
+
+
+class Scripted:
+    """20 ms frames: a quiet hiss, with one loud frame at `loud`."""
+    def __init__(self, count, loud=None):
+        import numpy as np
+        rng = np.random.default_rng(0)
+        self.frames = [(rng.normal(0, 30, 320)).astype(np.int16).tobytes() for _ in range(count)]
+        if loud is not None:
+            self.frames[loud] = np.full(320, 32767, np.int16).tobytes()
+
+    def read(self, timeout):
+        return self.frames.pop(0) if self.frames else None
+
+
+def test_background_moments_above_0_2_are_logged_with_their_time_and_saved(tmp_path):
+    import json
+    from datetime import datetime
+    log = measure.AudioLog(tmp_path, ['Plain model'], now=lambda: datetime(2026, 10, 22, 14, 3, 12))
+    scores = [0.05] * 150 + [0.43, 0.3] + [0.05] * 200 + [0.15]     # a peak 3 s in, then quiet
+    for index, frame in enumerate(Scripted(len(scores)).frames):
+        log.add(frame, [scores[index]])
+    log.finish()
+    [clip] = tmp_path.glob('*.wav')
+    assert clip.name == 'peak_20261022_140312_0.43.wav'
+    from core.wake_word import read_wav
+    assert len(read_wav(clip)) == (100 + 2 + 50) * 320               # 2 s before, 1 s after the last high score
+    [entry] = [json.loads(line) for line in (tmp_path / 'peaks.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert entry['time'] == '2026-10-22T14:03:12' and entry['seconds_into_background'] == 3.0
+    assert entry['scores'] == {'Plain model': 0.43} and entry['file'] == clip.name
+    assert measure.peak_lines(log)[1] == '    3.0 s (14:03:12): plain model 0.43  peak_20261022_140312_0.43.wav'
+
+
+def test_a_quiet_background_saves_nothing_and_a_peak_at_the_end_is_still_saved(tmp_path):
+    quiet = measure.AudioLog(tmp_path / 'quiet')
+    for frame in Scripted(300).frames:
+        quiet.add(frame, [0.2, 0.1])                                 # 0.20 itself is not above
+    quiet.finish()
+    assert not (tmp_path / 'quiet').exists() and measure.peak_lines(quiet) == ['Background moments above 0.20: none']
+    late = measure.AudioLog(tmp_path / 'late')
+    for frame in Scripted(10).frames:
+        late.add(frame, [0.6])
+    late.finish()
+    assert len(list((tmp_path / 'late').glob('*.wav'))) == 1
+
+
+def test_without_a_folder_the_log_only_keeps_levels_and_counts_lost_frames():
+    class Lossy(Scripted):
+        def read(self, timeout):
+            if len(self.frames) == 45:
+                self.frames.pop(0)
+                raise OverflowError
+            return super().read(timeout)
+    log = measure.AudioLog()
+    measure.listen(Lossy(50, loud=10), [Detector([0.9] * 20)], 1, clock=Clock(), log=log)
+    assert log.lost == 1 and log.peaks == [] and log.levels()['clipped'] == 320
+
+
+def test_the_microphone_check_reports_noise_clipping_and_lost_frames():
+    quiet, loud = measure.AudioLog(), measure.AudioLog()
+    for frame in Scripted(100).frames:
+        quiet.add(frame, [0.0])
+    for frame in Scripted(100, loud=50).frames:
+        loud.add(frame, [0.0])
+    lines = measure.microphone_lines(quiet, quiet)
+    assert lines[0].startswith('Microphone: background noise floor -61 dBFS') and len(lines) == 1
+    loud.lost = 2
+    lines = measure.microphone_lines(quiet, loud)
+    assert any('320 samples clipped' in line for line in lines) and 'lost frames' in lines[-1]

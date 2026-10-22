@@ -2,6 +2,7 @@
 
     env\\Scripts\\python.exe -B tools\\record_voice.py              (everything, about 9 minutes)
     env\\Scripts\\python.exe -B tools\\record_voice.py --only wake  (one part again: wake, speech, background, commands)
+    env\\Scripts\\python.exe -B tools\\record_voice.py --check      (microphone noise and clipping in the recordings)
 
 Parts:
   wake        "Hey Jarvis" 30 times, varied (normal, quick, quiet, tired, farther away)   ~2.5 min
@@ -131,6 +132,41 @@ def add_to_manifest(folder, path, text):
                                    'recorded_at': datetime.now().isoformat(timespec='seconds')}) + '\n')
 
 
+def clip_note(audio):
+    """A warning when a clip clipped (too loud for the microphone level)."""
+    import numpy as np
+    from core.wake_word import audio_levels
+    clipped = audio_levels(np.frombuffer(audio, dtype=np.int16))['clipped']
+    return f', CLIPPED ({clipped} samples): lower the mic level' if clipped else ''
+
+
+def check(voice_dir):
+    """Microphone health of the recordings so far, per part: noise floor, loudest moment,
+    and which clips clipped."""
+    import statistics
+    from core.wake_word import NOISY_FLOOR_DB, audio_levels, read_wav
+    lines = []
+    for part in ('wake', 'speech', 'background', 'commands'):
+        clips = sorted((Path(voice_dir) / part).glob('*.wav'))
+        if not clips:
+            lines.append(f'{part}: no recordings')
+            continue
+        levels = {clip.name: audio_levels(read_wav(clip)) for clip in clips}
+        clipped = [name for name, level in levels.items() if level['clipped']]
+        floor = statistics.median(level['noise_floor_db'] for level in levels.values())
+        lines.append(f'{part}: {len(clips)} clips, noise floor {floor:.0f} dBFS, loudest '
+                     f"{max(level['loudest_db'] for level in levels.values()):.0f} dBFS, "
+                     + (f"clipped in {len(clipped)}: {', '.join(clipped[:5])}{' ...' if len(clipped) > 5 else ''}"
+                        if clipped else 'no clipping'))
+        if clipped:
+            lines.append('  warning: lower the microphone level (Windows Settings > System > Sound > Input volume) '
+                         f'and record this part again with --only {part} --fresh.')
+        if part != 'background' and floor > NOISY_FLOOR_DB:
+            lines.append(f'  warning: the noise floor is high for a headset (above {NOISY_FLOOR_DB} dBFS): hiss, hum '
+                         'or fan noise on the mic. Check the plug, or lower the mic boost.')
+    return lines
+
+
 def clear(folder):
     for path in list(folder.glob('*.wav')) + list(folder.glob('manifest.jsonl')):
         path.unlink()
@@ -149,7 +185,7 @@ def record_wake(frames, vad, folder, score=None, prompts=WAKE_PROMPTS, wait=inpu
             print("I didn't hear you; again.")
             continue
         path = write_wav(next_path(folder, 'hey_jarvis'), audio)
-        print('saved' + (f', plain-model score {score(audio):.2f}' if score else ''), f'({path.name})')
+        print('saved' + (f', plain-model score {score(audio):.2f}' if score else '') + clip_note(audio), f'({path.name})')
         number += 1
         read_seconds(frames, 0.7)
 
@@ -191,7 +227,7 @@ def record_commands(frames, vad, folder, commands=COMMANDS, wait=input):
             continue
         path = write_wav(next_path(folder, 'command'), audio)
         add_to_manifest(folder, path, text)
-        print(f'saved ({path.name}, {len(audio) / (SAMPLE_RATE * 2):.1f} s)')
+        print(f'saved ({path.name}, {len(audio) / (SAMPLE_RATE * 2):.1f} s){clip_note(audio)}')
         number += 1
         read_seconds(frames, 0.5)
 
@@ -202,8 +238,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--only', choices=['wake', 'speech', 'background', 'commands'])
     parser.add_argument('--fresh', action='store_true', help="delete the chosen parts' old recordings first")
+    parser.add_argument('--check', action='store_true', help='check the recordings for mic noise and clipping (no recording)')
     parser.add_argument('--device', default=None, help='input device name or index (default: the system microphone)')
     args = parser.parse_args()
+    if args.check:
+        for line in check(VOICE_DIR):
+            print(line)
+        return
     parts = [args.only] if args.only else ['wake', 'speech', 'background', 'commands']
     folders = {part: VOICE_DIR / part for part in parts}
     if args.fresh:
@@ -228,6 +269,9 @@ def main():
             record_background(frames, folders['background'])
         if 'commands' in parts:
             record_commands(frames, vad, folders['commands'])
+    print('')
+    for line in check(VOICE_DIR):
+        print(line)
     print('\nAll done. Next: env\\Scripts\\python.exe -B tools\\train_wake_verifier.py')
 
 

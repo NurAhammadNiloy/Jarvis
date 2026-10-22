@@ -119,6 +119,40 @@ def read_wav(path):
         return np.frombuffer(clip.readframes(clip.getnframes()), dtype=np.int16)
 
 
+# Steady hiss at -50 dBFS already lifts the plain model to about 0.17 over two minutes
+# (measured with synthetic noise, 22 Oct 2026); a quiet headset mic sits well below that.
+NOISY_FLOOR_DB = -50
+CLIPPED_SAMPLE = 32700
+
+
+def audio_levels(samples):
+    """Microphone health of int16 samples, in dBFS: the noise floor (the quietest 10% of
+    20 ms frames), the loudest 20 ms frame, the peak sample, and how many samples clipped."""
+    import numpy as np
+    samples = np.asarray(samples, dtype=np.int16)
+    frames = samples[:len(samples) // 320 * 320].reshape(-1, 320).astype(np.float64)
+    rms = np.sqrt((frames ** 2).mean(axis=1)) if len(frames) else np.zeros(1)
+    magnitude = np.abs(samples.astype(np.int32))
+
+    def dbfs(value):
+        return round(float(20 * np.log10(max(value, 1.0) / 32768)), 1)
+    return {'noise_floor_db': dbfs(np.percentile(rms, 10)), 'loudest_db': dbfs(rms.max()),
+            'peak_db': dbfs(magnitude.max() if len(samples) else 0),
+            'clipped': int(np.count_nonzero(magnitude >= CLIPPED_SAMPLE))}
+
+
+def level_warnings(levels):
+    """What is wrong with the microphone signal, if anything."""
+    warnings = []
+    if levels['clipped']:
+        warnings.append(f"{levels['clipped']} samples clipped: lower the microphone level "
+                        "(Windows Settings > System > Sound > your input > Input volume).")
+    if levels['noise_floor_db'] > NOISY_FLOOR_DB:
+        warnings.append(f"noise floor {levels['noise_floor_db']:.0f} dBFS is high (hiss, hum or fan noise on "
+                        "the mic): it lifts wake-word scores. Check the headset plug, or lower the mic boost.")
+    return warnings
+
+
 def clip_frames(model, samples, offset=0):
     """[(plain-model score, audio features)] for each 80 ms step of a clip; the
     features are what a verifier sees at that moment (openWakeWord's method)."""

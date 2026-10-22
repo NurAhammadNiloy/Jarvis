@@ -10,12 +10,21 @@
 The same audio goes to the plain model and, once you have trained it
 (tools/train_wake_verifier.py), to the model tuned to your voice, so the two can be
 compared directly. Target: at least 9 of 10 detected, and no background score at or
-above the threshold. Nothing is recorded or saved, and nothing is sent anywhere.
+above the threshold.
+
+Every background moment scoring above 0.20 is logged with its time and saved as a short
+clip (2 s before, 1 s after) in data/voice/background_peaks/, so you can listen to what
+caused it. Nothing else is saved, and nothing is sent anywhere. The results also show the
+microphone's noise floor, clipping and lost frames.
 """
 import argparse
+from collections import deque
+from datetime import datetime
+import json
 from pathlib import Path
 import sys
 import time
+import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -24,17 +33,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # plain-"Jarvis" run hit 0.43 in background that peaked at 0.05 an hour earlier).
 MARGIN = 0.1
 MIN_THRESHOLD = 0.3
+CLIP_SCORE = 0.2          # background moments above this are saved to listen to
+SAMPLE_RATE, FRAME_BYTES = 16000, 640
 
 
-def listen(frames, detectors, seconds, clock=time.monotonic):
+def listen(frames, detectors, seconds, clock=time.monotonic, log=None):
     """Feed `seconds` of audio to every detector: per detector, (detections as
-    (time, score), highest score)."""
+    (time, score), highest score). `log` (an AudioLog) sees every frame and its scores."""
     results = [([], 0.0) for _ in detectors]
+    for detector in detectors:
+        detector.last_score = 0.0  # a score from before this window must not count in it
     started = clock()
     while clock() - started < seconds:
         try:
             frame = frames.read(timeout=0.1)
         except OverflowError:  # a few frames were lost; keep going
+            if log is not None:
+                log.lost += 1
             continue
         if frame is None:
             continue
@@ -44,7 +59,105 @@ def listen(frames, detectors, seconds, clock=time.monotonic):
             if event is not None:
                 found.append((clock() - started, event.score))
             results[index] = (found, max(highest, detector.last_score))
+        if log is not None:
+            log.add(frame, [detector.last_score for detector in detectors])
     return results
+
+
+class AudioLog:
+    """The audio of a measurement window, for its microphone levels. With a folder, every
+    moment scoring above `min_score` is saved as a clip (`before` s of lead-in, until
+    `after` s past the last high score) and logged with its time in peaks.jsonl."""
+
+    def __init__(self, folder=None, names=(), min_score=CLIP_SCORE, before=2.0, after=1.0,
+                 max_seconds=8.0, now=datetime.now):
+        self.folder = Path(folder) if folder else None
+        self.names, self.min_score, self.now = list(names), min_score, now
+        self.audio, self.lost, self.peaks = bytearray(), 0, []
+        self._history = deque(maxlen=int(before * SAMPLE_RATE * 2 / FRAME_BYTES))
+        self._after = int(after * SAMPLE_RATE * 2 / FRAME_BYTES)
+        self._max_bytes = int(max_seconds * SAMPLE_RATE) * 2
+        self._open = None
+
+    @property
+    def seconds(self):
+        return len(self.audio) / (SAMPLE_RATE * 2)
+
+    def add(self, frame, scores):
+        self.audio += frame
+        if self.folder is None:
+            return
+        score = max(scores, default=0.0)
+        moment = self._open
+        if moment is not None:
+            moment['audio'] += frame
+            if score > moment['score']:
+                moment.update(score=score, scores=list(scores), at=self.seconds, time=self.now())
+            moment['left'] = self._after if score > self.min_score else moment['left'] - 1
+            if moment['left'] <= 0 or len(moment['audio']) >= self._max_bytes:
+                self._save()
+        elif score > self.min_score:
+            self._open = {'audio': bytearray(b''.join(self._history) + frame), 'left': self._after,
+                          'score': score, 'scores': list(scores), 'at': self.seconds, 'time': self.now()}
+        self._history.append(frame)
+
+    def finish(self):
+        if self._open is not None:
+            self._save()
+
+    def levels(self):
+        import numpy as np
+        from core.wake_word import audio_levels
+        return audio_levels(np.frombuffer(bytes(self.audio), dtype=np.int16))
+
+    def _save(self):
+        import numpy as np
+        from core.wake_word import audio_levels
+        moment, self._open = self._open, None
+        audio = bytes(moment['audio'])
+        path = self.folder / f"peak_{moment['time']:%Y%m%d_%H%M%S}_{moment['score']:.2f}.wav"
+        self.folder.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(path), 'wb') as clip:
+            clip.setnchannels(1)
+            clip.setsampwidth(2)
+            clip.setframerate(SAMPLE_RATE)
+            clip.writeframes(audio)
+        names = self.names or [f'detector {i + 1}' for i in range(len(moment['scores']))]
+        entry = {'time': moment['time'].isoformat(timespec='seconds'),
+                 'seconds_into_background': round(moment['at'], 1),
+                 'scores': {name: round(score, 2) for name, score in zip(names, moment['scores'])},
+                 'file': path.name, 'levels': audio_levels(np.frombuffer(audio, dtype=np.int16))}
+        with open(self.folder / 'peaks.jsonl', 'a', encoding='utf-8') as manifest:
+            manifest.write(json.dumps(entry) + '\n')
+        self.peaks.append(entry)
+        print(f"\r  score {moment['score']:.2f} at {moment['at']:.1f} s ({moment['time']:%H:%M:%S}): "
+              f"saved {path.name}" + ' ' * 10)
+
+
+def peak_lines(log):
+    """The background moments that were saved, with their times."""
+    if not log.peaks:
+        return [f"Background moments above {CLIP_SCORE:.2f}: none"]
+    lines = [f"Background moments above {CLIP_SCORE:.2f}: {len(log.peaks)}, saved in {log.folder} (listen to them):"]
+    for peak in log.peaks:
+        scores = ', '.join(f"{name.lower()} {score:.2f}" for name, score in peak['scores'].items())
+        lines.append(f"  {peak['seconds_into_background']:5.1f} s ({peak['time'][11:]}): {scores}  {peak['file']}")
+    return lines
+
+
+def microphone_lines(background, tries):
+    """The microphone check: levels of the background and of your tries, and lost frames."""
+    from core.wake_word import level_warnings
+    back, spoken = background.levels(), tries.levels()
+    lost = background.lost + tries.lost
+    lines = [f"Microphone: background noise floor {back['noise_floor_db']:.0f} dBFS, loudest {back['loudest_db']:.0f} dBFS, "
+             f"{back['clipped']} clipped samples; your tries loudest {spoken['loudest_db']:.0f} dBFS, "
+             f"{spoken['clipped']} clipped samples; {lost} lost-frame events"]
+    for warning in level_warnings(back) + [w for w in level_warnings(spoken) if 'clipped' in w]:
+        lines.append("  warning: " + warning)
+    if lost:
+        lines.append("  warning: the microphone lost frames (the computer was busy); the joins can cause odd scores.")
+    return lines
 
 
 def advice(background_peak, tries, threshold):
@@ -89,7 +202,7 @@ def summary(name, background, tries, threshold):
 
 def main():
     from config.settings import WAKE_WORD_THRESHOLD, WAKE_WORD_VERIFIER_GATE
-    from core.wake_word import VERIFIER_PATH, OpenWakeWordDetector
+    from core.wake_word import VERIFIER_PATH, VOICE_DIR, OpenWakeWordDetector
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--threshold', type=float, default=WAKE_WORD_THRESHOLD)
     parser.add_argument('--background-seconds', type=float, default=120)
@@ -114,14 +227,16 @@ def main():
         print(f"\nStep 1: {args.background_seconds / 60:.0f} minutes of normal room sound. Talk, type or play a video,")
         print("but don't say \"Hey Jarvis\". Starting in 3 seconds...")
         listen(frames, detectors, 3)
+        background_log, tries_log = AudioLog(VOICE_DIR / 'background_peaks', names), AudioLog()
         background = [([], 0.0) for _ in detectors]
         for start in range(0, int(args.background_seconds), 10):
-            results = listen(frames, detectors, min(10, args.background_seconds - start))
+            results = listen(frames, detectors, min(10, args.background_seconds - start), log=background_log)
             for index, (found, peak) in enumerate(results):
                 previous, highest = background[index]
                 background[index] = (previous + [(start + t, s) for t, s in found], max(highest, peak))
             print(f"  {start + 10:.0f} s, highest so far: "
                   + ', '.join(f"{n.lower()} {b[1]:.2f}" for n, b in zip(names, background)), end='\r')
+        background_log.finish()
         print('\n')
 
         print("Step 2: say \"Hey Jarvis\" when prompted, at your normal distance and volume.")
@@ -129,7 +244,7 @@ def main():
         for number in range(1, args.tries + 1):
             listen(frames, detectors, 1.5)  # a pause, and the end of the previous try
             print(f"  ({number}/{args.tries}) Say \"Hey Jarvis\" now...", end=' ', flush=True)
-            results = listen(frames, detectors, 4)
+            results = listen(frames, detectors, 4, log=tries_log)
             for index, (found, peak) in enumerate(results):
                 tries[index].append((bool(found), found[0][1] if found else peak))
             print(', '.join(f"{n.lower()}: " + (f"detected {t[-1][1]:.2f}" if t[-1][0] else f"missed ({t[-1][1]:.2f})")
@@ -139,6 +254,8 @@ def main():
     for name, back, tried in zip(names, background, tries):
         for line in summary(name, back, tried, args.threshold):
             print(line)
+    for line in peak_lines(background_log) + microphone_lines(background_log, tries_log):
+        print(line)
 
 
 if __name__ == '__main__':
