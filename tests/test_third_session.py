@@ -388,3 +388,43 @@ def test_task_answer_that_is_a_command_is_a_new_request(jarvis):
     jarvis.hear(FOR_TWO)
     jarvis.hear(heard('what time is it', 0.95))
     assert jarvis.said()[-1].startswith('The current time is') and jarvis.stored() == []
+
+
+# --- 12:55 session (193aa5d4): flow fixes -----------------------------------------------
+
+EARTH_QUESTION = ("There's always something fascinating happening in the universe. "
+                  "Is there a specific topic or event you're curious about?")
+
+
+def run_window(assistant, listener, now, until):
+    ticks = []
+
+    def listen(timeout):
+        now[0] += 1
+        ticks.append(now[0])
+        return None
+    listener.listen.side_effect = listen
+    assistant.listen_for_command()
+    return ticks[-1]
+
+
+@pytest.mark.parametrize('reply, closes_after', [(EARTH_QUESTION, 20), ('Reminder set for today at 12:58 PM: stretch.', 10)])
+def test_window_is_20_seconds_after_a_question_and_10_after_a_statement(reply, closes_after):
+    from config import settings
+    assert settings.QUESTION_WINDOW_SECONDS == 20
+    now = [0]
+    assistant, listener = window_assistant(now)
+    assistant.output(reply)
+    assistant.active_conversation = True
+    assert run_window(assistant, listener, now, closes_after) == closes_after + 1  # closes once N s have passed
+    assert assistant.window_state() == 'passive'
+
+
+def test_window_state_shows_the_longer_window_after_a_question():
+    now = [0]
+    assistant, _ = window_assistant(now)
+    assistant.active_conversation = True
+    assistant.output(EARTH_QUESTION)
+    assert assistant.window_state() == 'active 20s'
+    now[0] = 5
+    assert assistant.window_state() == 'active 15s'

@@ -31,11 +31,13 @@ class Assistant:
             output = synthesize_speech
         self.listener, self.speech = listener, speech
         self._turn_uid = None
+        self._asked_question = False
 
         def reply(text):
             # Marks this as the reply to the utterance being handled, so the
             # transcript never mistakes an alarm going off for it.
             record('assistant_reply', uid=self._turn_uid, text=text)
+            self._asked_question = text.rstrip().endswith('?')
             if self.dialogue is not None:
                 self.dialogue.observe('assistant', text)
             return output(text)
@@ -44,9 +46,9 @@ class Assistant:
         self.clock = clock
         self.gate = ConfidenceGate(clock)
         self.state = ConversationState(clock)
-        from config.settings import ACTIVE_WINDOW_SECONDS
+        from config.settings import ACTIVE_WINDOW_SECONDS, QUESTION_WINDOW_SECONDS
         self.active_conversation = False
-        self.conversation_timeout = ACTIVE_WINDOW_SECONDS
+        self.answer_window, self.question_window = ACTIVE_WINDOW_SECONDS, QUESTION_WINDOW_SECONDS
         self.last_active_time = clock()
         self._recognition_failure_prompted = False
 
@@ -62,6 +64,11 @@ class Assistant:
         finally:
             self._turn_uid = None
             record('turn_finished', uid=recognition.uid, window=self.window_state())
+
+    @property
+    def conversation_timeout(self):
+        """Seconds to listen without the wake word: longer after a question."""
+        return self.question_window if self._asked_question else self.answer_window
 
     def window_state(self):
         """'active 10s' (time left to speak without the wake word) or 'passive'."""
