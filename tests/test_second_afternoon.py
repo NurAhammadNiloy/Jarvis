@@ -324,3 +324,23 @@ def test_which_timer_reads_three_then_and_n_more():
     timers = [SimpleNamespace(label=name, duration_seconds=60) for name in ('Tea', 'Coffee', 'Pasta', 'Rice', 'Eggs')]
     assert _list_timers(timers[:3]) == 'tea, coffee or pasta'
     assert _list_timers(timers) == 'tea, coffee, pasta and 2 more'
+
+
+# --- the reminder list says how many first ----------------------------------------------------
+
+HOW_MANY = heard('Jarvis how many reminders I have', 0.94322705,                                        # 581
+                 ('Yarvis how many reminders I have', 0.94322705), ('Jarvis hHow many reminders I have', 0.94322705))
+
+
+def test_reminder_list_says_the_count_first_then_the_items(four):
+    four.hear(HOW_MANY)
+    assert four.said() == ['You have 4 reminders.', 'call my Mom, today at 3:20 PM.', 'delete my old emails, today at 4:20 PM.',
+                           'call my mom minutes, today at 5:20 PM.', 'stand up, today at 6:20 PM.']
+
+
+def test_a_single_reminder_and_an_empty_list(jarvis):
+    jarvis.hear(heard('Jarvis list my reminders', 0.9))
+    assert jarvis.said()[-1] == 'No reminders.'
+    jarvis.services.reminders.create({'task': 'stand up', 'due': NOW.replace(hour=17)})
+    jarvis.hear(heard('Jarvis list my reminders', 0.9))
+    assert jarvis.said()[-2:] == ['You have 1 reminder.', 'stand up, today at 5:20 PM.']

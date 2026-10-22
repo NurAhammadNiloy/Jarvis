@@ -31,6 +31,7 @@ RULES = (
     ('snooze_reminder',   _LEAD + r"snooze\b"),
     ('delete_reminder',   _LEAD + r"(?:delete|remove|cancel|clear|drop|forget(?:\s+about)?)\b.*" + _REMINDER),
     ('list_reminders',    _LEAD + r"(?:what|which|list|show|tell|read|check|do\s+i\s+have|have\s+i\s+got|are\s+there)\b.*" + _REMINDER
+                          + r"|" + _LEAD + r"how\s+many\b.*" + _REMINDER
                           + r"|" + _LEAD + r"(?:my\s+)?reminders" + _END),
     ('create_reminder',   r"\bremind\s+(?:me|us)\b"
                           + r"|" + _LEAD + r"(?:set|create|add|make)\s+(?:(?:a|an|another|new)\s+)*reminder\b"),

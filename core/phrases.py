@@ -118,7 +118,7 @@ PHRASES = {
     'reminder_missed': ['While I was off, you missed a reminder {when}: {task}.'],
     'alarm_missed': ['While I was off, your alarm {when} went off.'],
     'no_reminders': ['No {noun}s.', "You don't have any {noun}s."],
-    'reminders_heading': ['{count} {noun}{s}:', 'You have {count} {noun}{s}:'],
+    'reminders_heading': ['You have {count} {noun}{s}.'],  # the count comes first, then the items
     'reminder_deleted': ['Deleted: {label}, {when}.'],
     'reminders_all_cancelled': ['All {count} {noun}s cancelled.'],
     'reminder_snoozed': ["Snoozed. I'll remind you {when}.", 'Snoozed until {time}.'],
