@@ -1,5 +1,10 @@
-"""Shared safety net: no test may touch the real data/reminders.db or reminders.json."""
+"""Shared safety net: no test may touch the real data/ or logs/ folders."""
 import pytest
+
+from real_data_guard import protect_real_data
+
+# Any write under data/ or logs/ now raises PermissionError instead of happening.
+protect_real_data()
 
 
 @pytest.fixture(autouse=True)

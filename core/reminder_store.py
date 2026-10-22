@@ -52,11 +52,12 @@ def _utc(moment):
 
 
 class ReminderStore:
-    def __init__(self, path=DEFAULT_DB, legacy_json=None, zone=None):
+    def __init__(self, path=None, legacy_json=None, zone=None):
         if zone is None:
             from core.reminder_parser import local_zone
             zone = local_zone()
-        self.path, self.zone = Path(path), zone
+        # Resolved now, not at import, so a redirected DEFAULT_DB (tests) applies.
+        self.path, self.zone = Path(path if path is not None else DEFAULT_DB), zone
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as conn:
