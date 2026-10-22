@@ -337,8 +337,12 @@ class Assistant:
             self.state.clear('read-only proposal')
             self._run(command)
             return True
-        reply = ((self._propose(turn.proposal) if turn.proposal else None) or turn.reply or
-                 "I couldn't work out that request. Could you say it again?")
+        if turn.proposal:
+            # The model's words about a proposal are never spoken on their own: if the
+            # proposal cannot run, they might describe something that did not happen.
+            reply = self._propose(turn.proposal) or "Sorry, I couldn't work out what to do. Could you say it again?"
+        else:
+            reply = turn.reply or "I couldn't work out that request. Could you say it again?"
         self.active_conversation = True
         self.last_active_time = self.clock()
         self.speech.stop()

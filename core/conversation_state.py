@@ -22,10 +22,12 @@ from core.voice_policy import means_stop, stop_heard, strip_wake_word, words
 
 _YES = {'yes', 'sure', 'ok', 'confirm', 'confirmed', 'correct', 'right', 'absolutely', 'definitely',
         'affirmative', 'do', 'go'}
-_YES_FILLER = _YES | {'please', 'it', 'that', 'ahead', 'sir', 'jarvis', 'just', 'to', 'exactly', 'fine',
-                      'alright', "that's", 'thats'}
+# "I said yes", "yes I said", "I already said yes": insisting is still yes.
+_INSIST = {'i', 'said', 'say', 'already', 'told', 'you', 'have'}
+_YES_FILLER = _YES | _INSIST | {'please', 'it', 'that', 'ahead', 'sir', 'jarvis', 'just', 'to', 'exactly', 'fine',
+                                'alright', "that's", 'thats'}
 _NO = {'no', 'nope', 'nah', 'negative', "don't"}
-_NO_FILLER = _NO | {'thanks', 'thank', 'you', 'please', 'sir', 'jarvis', 'not', 'that', 'it', 'wait', 'do'}
+_NO_FILLER = _NO | _INSIST | {'thanks', 'thank', 'please', 'sir', 'jarvis', 'not', 'that', 'it', 'wait', 'do'}
 _NEGATIONS = {'no', 'nope', 'nah', 'not', "don't", 'never', 'negative'}
 _AFFIRMATIONS = _YES - {'do', 'go'}  # words that say yes on their own
 _CANCEL = {('cancel',), ('never', 'mind'), ('nevermind',), ('forget', 'it'), ('cancel', 'that'),

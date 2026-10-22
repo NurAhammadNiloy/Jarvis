@@ -18,11 +18,37 @@ _DETAIL = re.compile(
     r"|(?:full|whole|entire)\s+story|in\s+(?:more\s+|great\s+|full\s+)?detail|detailed|history\s+of"
     r"|everything\s+(?:about|on))\b", re.IGNORECASE)
 _REPLY_LIMIT = {'short': 500, 'long': 1500}  # characters
+CLAIM_FALLBACK = "I haven't done anything yet. What should I do?"
 
 
 def answer_length(text):
     """'long' when the user asks for detail ("tell me about", "explain", "full story")."""
     return 'long' if _DETAIL.search(text) else 'short'
+
+
+# The model cannot execute anything, so it must never say that something was done.
+# Only the executor's result may say that. A sentence that claims an action is
+# removed from the model's reply (in code, not only in the prompt).
+_DONE = (r"(?:set(?!\s+out)|saved|created|scheduled|cancel(?:l)?ed|deleted|removed|added|started|stopped|paused"
+         r"|resumed|snoozed|booked|turned\s+off|opened|played|updated|changed|taken\s+care\s+of)")
+_CLAIMS = (
+    # "I'll set that reminder", "I've cancelled it", "I have gone ahead and added ..."
+    re.compile(r"\bI(?:['’]ve|['’]ll|['’]m|\s+have|\s+will|\s+just|\s+already)?\s+(?:now\s+|just\s+|already\s+)?"
+               r"(?:gone\s+ahead\s+and\s+|going\s+to\s+)?" + _DONE + r"\b", re.IGNORECASE),
+    # "Your reminder is set", "it's been cancelled", "the timer has been started"
+    re.compile(r"\b(?:reminder|alarm|timer|it|that)s?(?:['’]s|\s+is|\s+has\s+been|\s+have\s+been|\s+was|\s+are)"
+               r"\s+(?:now\s+|all\s+)?(?:been\s+)?" + _DONE + r"\b", re.IGNORECASE),
+    # "Done." / "All set!" / "Consider it done."
+    re.compile(r"^\W*(?:done|all\s+set|consider\s+it\s+done)\b", re.IGNORECASE),
+)
+
+
+def without_action_claims(reply):
+    """The reply without sentences that claim an action happened ('' if all did)."""
+    sentences = re.split(r"(?<=[.!?])\s+", reply.strip())
+    # A question ("Should I set an alarm?") never claims anything was done.
+    kept = [s for s in sentences if s.rstrip().endswith('?') or not any(p.search(s) for p in _CLAIMS)]
+    return ' '.join(kept).strip()
 
 
 @dataclass(frozen=True)
@@ -101,9 +127,16 @@ class Dialogue:
                 raise ValueError('Invalid reply')
             if query is not None and (not isinstance(query, str) or not 0 < len(query) <= 400):
                 raise ValueError('Invalid proposal')
+            honest = without_action_claims(reply)
+            if honest != reply:
+                from core.conversation_log import record
+                record('dialogue_claim_removed', reply=reply, kept=honest)
+                reply = honest
             if query is not None:
                 self._validate(query)
                 return DialogueTurn(reply, proposal=query)
+            if not reply:
+                return DialogueTurn(CLAIM_FALLBACK)
             self.asked = reply.rstrip().endswith('?')
             return DialogueTurn(reply)
         except Exception:

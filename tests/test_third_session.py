@@ -536,3 +536,55 @@ def test_confident_conversation_is_not_unclear_audio(jarvis, utterance):
 def test_requests_that_could_become_actions_still_need_agreement(jarvis, utterance):
     jarvis.hear(utterance)
     assert jarvis.stored() == []
+
+
+# --- 13:10 session (73bc6f3e): never claim an action that did not happen -----------------
+
+I_SAID_YES = heard('I said yes', 0.92144281, ('I said yesss', 0.921))                           # 1132
+
+
+@pytest.mark.parametrize('text', ['I said yes', 'yes I said', 'I already said yes', 'I said yes yes',
+                                  'I told you yes'])
+def test_insisting_is_still_yes(text):
+    from core.conversation_state import answer_kind
+    assert answer_kind(text) == 'yes'
+
+
+@pytest.mark.parametrize('text, kind', [('I said no', 'no'), ('I said', None), ('I said call mom', None)])
+def test_insisting_does_not_invent_a_yes(text, kind):
+    from core.conversation_state import answer_kind
+    assert answer_kind(text) == kind
+
+
+def test_i_said_yes_confirms_the_pending_reminder(jarvis):
+    from core.command_engine import understand_query
+    command = understand_query('remind me about stand up every Monday at 9:00 a.m.', jarvis.assistant.services)
+    jarvis.assistant.state.confirm(command, 'Set a weekly reminder, Mondays at 9 AM: stand up?')
+    jarvis.hear(I_SAID_YES)
+    jarvis.resolver.assert_not_called()
+    assert [(kind, task) for kind, task, _ in jarvis.stored()] == [('reminder', 'stand up')]
+
+
+@pytest.mark.parametrize('claim', ["Great, I'll set that reminder for you.", "Your reminder is set.",
+                                   "I've cancelled the pasta timer.", "Done.", "It's been added to your list."])
+def test_model_replies_that_claim_an_action_are_never_spoken(jarvis, claim):
+    # Logged: proposal "create reminder" could not run, and the reply claimed it would be set.
+    jarvis.resolver.return_value = {'reply': claim, 'query': 'create reminder'}
+    jarvis.hear(I_SAID_YES)
+    jarvis.resolver.return_value = {'reply': claim, 'query': None}
+    jarvis.hear(heard('Jarvis I said set it', 0.92))
+    assert all(claim not in line for line in jarvis.said())
+    assert jarvis.stored() == []
+
+
+@pytest.mark.parametrize('reply', ['Black holes form when massive stars collapse.', 'Hamlet is set in Denmark.',
+                                   'I can set a reminder if you like.', 'Should I set an alarm?',
+                                   'I cannot look up live news, but I can tell you about earthquakes.'])
+def test_ordinary_answers_are_kept(reply):
+    from core.dialogue import without_action_claims
+    assert without_action_claims(reply) == reply
+
+
+def test_only_the_claiming_sentence_is_removed():
+    from core.dialogue import without_action_claims
+    assert without_action_claims("Got it, I've saved that. What else?") == 'What else?'
