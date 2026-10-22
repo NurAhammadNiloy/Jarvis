@@ -224,9 +224,9 @@ def window_assistant(now, speaking=lambda: False):
     return assistant, listener
 
 
-def test_active_window_is_ten_seconds_from_settings():
+def test_active_window_is_thirty_seconds_from_settings():
     from config import settings
-    assert settings.ACTIVE_WINDOW_SECONDS == 10
+    assert settings.ACTIVE_WINDOW_SECONDS == 30
     now = [0]
     assistant, listener = window_assistant(now)
     ticks = []
@@ -236,7 +236,7 @@ def test_active_window_is_ten_seconds_from_settings():
         now[0] += 1
     listener.listen.side_effect = listen
     assistant.listen_for_command()
-    assert not assistant.active_conversation and ticks[-1] == 10
+    assert not assistant.active_conversation and ticks[-1] == 30
     assert assistant.window_state() == 'passive'
 
 
@@ -251,7 +251,7 @@ def test_window_starts_when_jarvis_stops_speaking_and_stays_open_while_waiting()
         clears.get(now[0], lambda: None)()
     listener.listen.side_effect = listen
     assistant.listen_for_command()
-    assert now[0] == 55  # talking until 30, pending until 45 (last seen at 44), then the 10 s window
+    assert now[0] == 75  # talking until 30, pending until 45 (last seen at 44), then the 30 s window
 
 
 def test_passive_mode_is_announced(capsys):
@@ -408,10 +408,10 @@ def run_window(assistant, listener, now, until):
     return ticks[-1]
 
 
-@pytest.mark.parametrize('reply, closes_after', [(EARTH_QUESTION, 20), ('Done, reminding you at 12:58 PM: stretch.', 10)])
-def test_window_is_20_seconds_after_a_question_and_10_after_a_statement(reply, closes_after):
+@pytest.mark.parametrize('reply, closes_after', [(EARTH_QUESTION, 30), ('Done, reminding you at 12:58 PM: stretch.', 30)])
+def test_window_is_30_seconds_after_a_question_and_after_a_statement(reply, closes_after):
     from config import settings
-    assert settings.QUESTION_WINDOW_SECONDS == 20
+    assert settings.QUESTION_WINDOW_SECONDS == 30
     now = [0]
     assistant, listener = window_assistant(now)
     assistant.output(reply)
@@ -425,9 +425,9 @@ def test_window_state_shows_the_longer_window_after_a_question():
     assistant, _ = window_assistant(now)
     assistant.active_conversation = True
     assistant.output(EARTH_QUESTION)
-    assert assistant.window_state() == 'active 20s'
+    assert assistant.window_state() == 'active 30s'
     now[0] = 5
-    assert assistant.window_state() == 'active 15s'
+    assert assistant.window_state() == 'active 25s'
 
 
 # --- said over Jarvis's question (193aa5d4 seq 235 / 361) ------------------------------

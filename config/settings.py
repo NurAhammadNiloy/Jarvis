@@ -17,10 +17,10 @@ ECHO_MODE = "speakers"
 
 # After the wake word or a finished exchange (once Jarvis stops speaking), Jarvis
 # listens without the wake word for this long, then returns to passive mode.
-ACTIVE_WINDOW_SECONDS = 10
+ACTIVE_WINDOW_SECONDS = 30
 
 # The same, when Jarvis's last reply ended with a question (you may need to think).
-QUESTION_WINDOW_SECONDS = 20
+QUESTION_WINDOW_SECONDS = 30
 
 # "undo" / "no, that's wrong" / "cancel that" reverses the last action for this long.
 UNDO_WINDOW_SECONDS = 60
