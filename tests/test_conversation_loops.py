@@ -79,7 +79,7 @@ def asked_a_question(jarvis):
 def test_full_alarm_request_sets_the_alarm_without_a_question(jarvis):
     jarvis.hear(ALARM_FULL)
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
-    assert jarvis.said() == ['Alarm set for today at 10:38 AM.']
+    assert jarvis.said() == ['Alarm set for 10:38 AM.']
     jarvis.resolver.assert_not_called()
 
 
@@ -89,7 +89,7 @@ def test_time_answer_completes_the_alarm_instead_of_starting_a_new_request(jarvi
     assert jarvis.said() == ['What time should I set the alarm for?']
     jarvis.hear(answer)
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
-    assert jarvis.said()[-1] == 'Alarm set for today at 10:38 AM.'
+    assert jarvis.said()[-1] == 'Alarm set for 10:38 AM.'
     jarvis.resolver.assert_not_called()
 
 
@@ -98,7 +98,7 @@ def test_model_proposal_runs_at_once_with_its_parsed_values(jarvis):
     jarvis.resolver.return_value = ALARM_PROPOSAL
     jarvis.hear(AFTER_TWO_MINUTES_ON)  # idle: conversation, so the model proposes
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
-    assert jarvis.said() == ['Alarm set for today at 10:38 AM.']
+    assert jarvis.said() == ['Alarm set for 10:38 AM.']
     jarvis.hear(YES)  # nothing left to confirm
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
     assert jarvis.resolver.call_count == 1
@@ -115,7 +115,7 @@ def confirm_alarm(jarvis):
 
 def test_reminder_with_a_spelling_variant_takes_the_fast_path(jarvis):
     jarvis.hear(STRETCH)
-    assert jarvis.said() == ['Reminder set for today at 10:38 AM: stretch.']
+    assert jarvis.said() == ['Done, reminding you at 10:38 AM: stretch.']
     assert jarvis.pending() == [('reminder', IN_TWO_MINUTES)]
     jarvis.resolver.assert_not_called()
 
@@ -154,7 +154,7 @@ def test_yes_confirms_a_pending_proposal_in_any_state(jarvis, setup, answer):
     calls = jarvis.resolver.call_count
     jarvis.hear(answer)
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
-    assert jarvis.said()[-1] == 'Alarm set for today at 10:38 AM.'
+    assert jarvis.said()[-1] == 'Alarm set for 10:38 AM.'
     assert jarvis.resolver.call_count == calls
 
 
@@ -210,7 +210,7 @@ def test_slot_answer_can_ask_the_next_question(jarvis):
 def test_slot_answer_that_is_a_request_of_its_own_runs_as_a_new_request(jarvis):
     jarvis.hear(SET_ALARM)
     jarvis.hear(heard('what time is it', 0.95))
-    assert jarvis.said()[-1].startswith('The current time is')
+    assert jarvis.said()[-1].startswith("It's ")
     assert not jarvis.assistant.state.pending
     assert jarvis.pending() == []
 
@@ -236,7 +236,7 @@ def test_unrecognized_audio_with_nothing_pending_is_ignored_silently(jarvis):
 def test_unrecognized_audio_while_waiting_says_so(jarvis, setup):
     setup(jarvis)
     jarvis.hear(NOISE)
-    assert jarvis.said()[-1].startswith("I couldn't hear that.")
+    assert jarvis.said()[-1].startswith("Sorry?")
 
 
 # --- the terminal -------------------------------------------------------------------
@@ -262,12 +262,12 @@ def test_each_reply_is_printed_exactly_once(monkeypatch, capsys):
         conversation_log.record('voice_decision', decision='accept', text='set an alarm')
         conversation_log.record('command_result', intent='alarm', status='pending')
         speech_synthesis.synthesize_speech('What time should I set the alarm for?')
-        speech_synthesis.synthesize_speech('Sir, this is your reminder: stretch.')  # not tied to a turn
+        speech_synthesis.synthesize_speech('Time to stretch.')  # not tied to a turn
     finally:
         conversation_log.remove_listener(printer)
     out = capsys.readouterr().out
     assert out.count('What time should I set the alarm for?') == 1
-    assert out.count('Sir, this is your reminder: stretch.') == 1
+    assert out.count('Time to stretch.') == 1
 
 
 # --- speakers mode ------------------------------------------------------------------

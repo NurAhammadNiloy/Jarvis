@@ -8,6 +8,7 @@ import re
 import time
 
 from core.conversation_state import answer_kind
+from core.phrases import PHRASES, say
 from core.voice_policy import ConfidenceGate, Recognition
 from core.intent_classifier import COMMAND_INTENTS, route
 
@@ -18,8 +19,8 @@ _DETAIL = re.compile(
     r"|(?:full|whole|entire)\s+story|in\s+(?:more\s+|great\s+|full\s+)?detail|detailed|history\s+of"
     r"|everything\s+(?:about|on))\b", re.IGNORECASE)
 _REPLY_LIMIT = {'short': 500, 'long': 1500}  # characters
-CLAIM_FALLBACK = "I haven't done anything yet. What should I do?"
-MODEL_FAILED = "Sorry, I lost my train of thought. Could you say that again?"
+CLAIM_FALLBACK = PHRASES['claim_fallback'][0]
+MODEL_FAILED = PHRASES['model_failed'][0]
 
 
 def answer_length(text):
@@ -42,6 +43,19 @@ _CLAIMS = (
     # "Done." / "All set!" / "Consider it done."
     re.compile(r"^\W*(?:done|all\s+set|consider\s+it\s+done)\b", re.IGNORECASE),
 )
+
+
+# Closing offers of more help: dropped, Jarvis just stops talking.
+_FILLER = re.compile(r"^\W*(?:(?:alright|all\s+right|okay|ok|sure|got\s+it|great|of\s+course)\W+)?(?:let\s+me\s+know\s+if|is\s+there\s+anything\s+else|anything\s+else\s+(?:i\s+can|you)"
+                     r"|feel\s+free\s+to|if\s+you\s+(?:need|have)\s+(?:anything|any\s+(?:more|other))|hope\s+(?:this|that)\s+helps"
+                     r"|i'?m\s+here\s+(?:if|whenever))", re.IGNORECASE)
+
+
+def without_filler(reply):
+    """The reply without closing offers of more help ("Okay." if that was all of it)."""
+    sentences = re.split(r"(?<=[.!?])\s+", reply.strip())
+    kept = [s for s in sentences if not _FILLER.match(s)]
+    return ' '.join(kept).strip() or say('okay')
 
 
 def without_action_claims(reply):
@@ -146,9 +160,9 @@ class Dialogue:
         asked, self.asked = self.asked, False
         kind = answer_kind(recognition.text)
         if not pending and kind == 'cancel':
-            return DialogueTurn('Okay.')
+            return DialogueTurn(say('okay'))
         if not pending and kind == 'yes' and not asked:
-            return DialogueTurn('What would you like me to do?')
+            return DialogueTurn(say('what_to_do'))
         # A "yes" to a question the model asked goes back to the model, which
         # can only turn it into a proposal that needs its own confirmation.
         from core.conversation_log import record
@@ -168,6 +182,7 @@ class Dialogue:
                    raw=raw if isinstance(raw, str) else repr(raw)[:2000] if raw is not None else None)
             return DialogueTurn(MODEL_FAILED)
         reply, query = _shorten(result['reply'], _REPLY_LIMIT[length]), result['query']
+        reply = without_filler(reply)
         honest = without_action_claims(reply)
         if honest != reply:
             record('dialogue_claim_removed', reply=reply, kept=honest)

@@ -209,7 +209,7 @@ def test_undo_window_is_60_seconds(jarvis):
     jarvis.hear(CERTAIN_TIMER)
     jarvis.now[0] = 61
     jarvis.hear(heard('undo', 0.9))
-    assert jarvis.said()[-1] == "There's nothing to undo." and list(jarvis.timers()) == ['Pasta']
+    assert jarvis.said()[-1] == 'Nothing to undo.' and list(jarvis.timers()) == ['Pasta']
 
 
 def test_some_actions_cannot_be_undone(jarvis):
@@ -273,7 +273,7 @@ def test_a_new_request_instead_of_an_answer_runs(jarvis):
     two_timers(jarvis)
     jarvis.hear(CANCEL_THE_TIMER)
     jarvis.hear(heard('what time is it', 0.95))
-    assert jarvis.said()[-1].startswith('The current time is') and len(jarvis.timers()) == 3
+    assert jarvis.said()[-1].startswith("It's ") and len(jarvis.timers()) == 3
 
 
 # --- small fixes ---------------------------------------------------------------------------
@@ -297,9 +297,10 @@ def test_wake_word_in_the_first_two_words(text, addressed):
 
 def test_hey_jarvis_in_passive_mode_is_heard(jarvis):
     jarvis.hear(heard('hey Jarvis what time is it', 0.9), passive=True)
-    assert jarvis.said()[-1].startswith('The current time is')
+    assert jarvis.said()[-1].startswith("It's ")
     jarvis.hear(heard('hey Jarvis', 0.9), passive=True)
-    assert jarvis.said()[-1] in ('At your service, sir.', 'How can I help, sir?')
+    from core.phrases import PHRASES
+    assert jarvis.said()[-1] in PHRASES['greeting']
 
 
 @pytest.mark.parametrize('utterance', [STOP_THE_MUSIC, heard('Jarvis pause YouTube', 0.9),
@@ -315,7 +316,7 @@ def test_alarm_question_is_always_the_alarm_question(jarvis):
     jarvis.hear(NEAREST_ALARM)
     assert jarvis.said() == ['What time should I set the alarm for?']
     jarvis.hear(heard('in 3 minutes', 0.85853094))
-    assert jarvis.said()[-1] == 'Alarm set for today at 1:15 PM.'   # no "nearest set an alarm" label
+    assert jarvis.said()[-1] == 'Alarm set for 1:15 PM.'   # no "nearest set an alarm" label
 
 
 def test_words_with_a_time_before_set_an_alarm_are_kept():

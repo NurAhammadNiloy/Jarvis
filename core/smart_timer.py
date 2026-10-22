@@ -15,6 +15,7 @@ Features:
 - Time remaining queries
 """
 
+from core.phrases import say
 import threading
 import time
 import re
@@ -440,17 +441,10 @@ class SmartTimerManager:
             if suggested:
                 duration_seconds = suggested
                 duration_str = self._format_duration(suggested)
-                respond(
-                    f"I'll set your {label} timer for {duration_str}, "
-                    f"based on your usual preference. Is that okay?"
-                )
-                # In production, you'd wait for confirmation here
+                # The announcement below says what was set; "undo" reverses it.
         
         if duration_seconds is None or duration_seconds <= 0:
-            respond(
-                "I couldn't understand the duration. "
-                "Try saying something like '5 minutes' or 'half an hour'."
-            )
+            respond(say('timer_no_duration'))
             return None
         
         # Detect category
@@ -486,21 +480,9 @@ class SmartTimerManager:
     def _announce_timer_set(self, timer: SmartTimer, duration_str: str, respond=synthesize_speech):
         """Announce timer creation with style."""
         if timer.label:
-            response = f"Your {timer.label} timer is set for {duration_str}."
+            respond(say('timer_set', name=timer.label.lower(), duration=duration_str))
         else:
-            response = f"Timer set for {duration_str}."
-        
-        # Add contextual info
-        if timer.category == 'cooking':
-            response += " I'll keep an eye on it for you."
-        elif timer.category == 'work':
-            response += " Stay focused, sir."
-        elif timer.category == 'exercise':
-            response += " Let's do this!"
-        else:
-            response += " I'll alert you when it's done."
-        
-        respond(response)
+            respond(say('timer_set_plain', duration=duration_str))
     
     def _start_timer_thread(self, timer: SmartTimer):
         """Start the timer monitoring thread."""
@@ -536,15 +518,15 @@ class SmartTimerManager:
         
         # Always announce 10 seconds
         if duration > 15:
-            milestones.append((10, "10 seconds remaining"))
+            milestones.append((10, "10 seconds left"))
         
         # 30 seconds for timers > 1 min
         if duration >= 90:
-            milestones.append((30, "30 seconds remaining"))
+            milestones.append((30, "30 seconds left"))
         
         # 1 minute for timers > 2 min
         if duration >= 150:
-            milestones.append((60, "1 minute remaining"))
+            milestones.append((60, "1 minute left"))
         
         # Halfway point for timers > 4 minutes
         if duration >= 240:
@@ -553,7 +535,7 @@ class SmartTimerManager:
         
         # 5 minutes for timers > 10 min
         if duration >= 600:
-            milestones.append((300, "5 minutes remaining"))
+            milestones.append((300, "5 minutes left"))
         
         return sorted(milestones, key=lambda x: -x[0])
     
@@ -574,19 +556,9 @@ class SmartTimerManager:
         
         # Build completion message
         if timer.label:
-            message = f"Sir, your {timer.label} timer is complete!"
+            message = say('timer_done', name=timer.label.lower())
         else:
-            message = f"Your {self._format_duration(timer.duration_seconds)} timer is complete!"
-        
-        # Add category-specific message
-        if timer.category == 'cooking':
-            message += " Your food should be ready."
-        elif timer.category == 'work':
-            message += " Time for a break, perhaps?"
-        elif timer.category == 'exercise':
-            message += " Great job!"
-        elif timer.category == 'break':
-            message += " Ready to get back to it?"
+            message = say('timer_done_plain')
         
         # Use smart alert system (handles visual, audio, and voice)
         self.notifications.completion(
@@ -608,7 +580,7 @@ class SmartTimerManager:
         """Start the next timer in a chain."""
         chain = completed_timer.chain_next
         if chain:
-            self.notifications.speak("Starting your next timer...")
+            self.notifications.speak(say('timer_next'))
             self.create_timer(
                 text=f"{chain.get('duration', '5 minutes')}",
                 label=chain.get('label'),
@@ -622,7 +594,7 @@ class SmartTimerManager:
         
         if not timer and (timer_id or label):
             # A specific timer was requested: never act on a different one.
-            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            respond(say('timer_not_found', what=f"a {label.lower()} timer" if label else 'that timer'))
             return False
 
         # No timer was named: use the only running timer, if there is one
@@ -632,14 +604,14 @@ class SmartTimerManager:
                 if len(running_timers) == 1:
                     timer = running_timers[0]
                 elif len(running_timers) > 1:
-                    respond("You have multiple timers running. Which one should I pause?")
+                    respond(say('timer_which', verb='pause'))
                     return False
                 else:
-                    respond("There are no running timers to pause.")
+                    respond(say('timer_none_to', verb='pause'))
                     return False
         
         if timer.state != TimerState.RUNNING:
-            respond("That timer is not currently running.")
+            respond(say('timer_not_running'))
             return False
         
         self.last_affected = [(timer, timer.remaining_seconds, TimerState.RUNNING)]
@@ -649,10 +621,7 @@ class SmartTimerManager:
         timer._stop_event.set()
         
         remaining = self._format_remaining(timer.remaining_seconds)
-        if timer.label:
-            respond(f"{timer.label} timer paused with {remaining} remaining.")
-        else:
-            respond(f"Timer paused with {remaining} remaining.")
+        respond(say('timer_paused', name=(timer.label or 'timer').lower(), left=remaining))
         
         return True
     
@@ -662,7 +631,7 @@ class SmartTimerManager:
         
         if not timer and (timer_id or label):
             # A specific timer was requested: never act on a different one.
-            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            respond(say('timer_not_found', what=f"a {label.lower()} timer" if label else 'that timer'))
             return False
 
         # No timer was named: use the only paused timer, if there is one
@@ -672,14 +641,14 @@ class SmartTimerManager:
                 if len(paused_timers) == 1:
                     timer = paused_timers[0]
                 elif len(paused_timers) > 1:
-                    respond("You have multiple timers paused. Which one should I resume?")
+                    respond(say('timer_which', verb='resume'))
                     return False
                 else:
-                    respond("There are no paused timers to resume.")
+                    respond(say('timer_none_to', verb='resume'))
                     return False
         
         if timer.state != TimerState.PAUSED:
-            respond("That timer is not paused.")
+            respond(say('timer_not_paused'))
             return False
         
         self.last_affected = [(timer, timer.remaining_seconds, TimerState.PAUSED)]
@@ -691,10 +660,7 @@ class SmartTimerManager:
         self._start_timer_thread(timer)
         
         remaining = self._format_remaining(timer.remaining_seconds)
-        if timer.label:
-            respond(f"{timer.label} timer resumed. {remaining} remaining.")
-        else:
-            respond(f"Timer resumed. {remaining} remaining.")
+        respond(say('timer_resumed', left=remaining))
         
         return True
     
@@ -704,7 +670,7 @@ class SmartTimerManager:
         
         if not timer and (timer_id or label):
             # A specific timer was requested: never act on a different one.
-            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            respond(say('timer_not_found', what=f"a {label.lower()} timer" if label else 'that timer'))
             return False
 
         if not timer:
@@ -713,10 +679,10 @@ class SmartTimerManager:
                 if len(self.timers) == 1:
                     timer = list(self.timers.values())[0]
                 elif len(self.timers) > 1:
-                    respond("You have multiple timers. Which one should I cancel?")
+                    respond(say('timer_which', verb='cancel'))
                     return False
                 else:
-                    respond("There are no active timers.")
+                    respond(say('no_timers'))
                     return False
         
         self.last_affected = [(timer, timer.remaining_seconds, timer.state)]
@@ -728,9 +694,9 @@ class SmartTimerManager:
                 del self.timers[timer.id]
         
         if timer.label:
-            respond(f"{timer.label} timer cancelled.")
+            respond(say('timer_cancelled', name=timer.label.lower()))
         else:
-            respond("Timer cancelled.")
+            respond(say('timer_cancelled_plain'))
         
         return True
     
@@ -745,11 +711,11 @@ class SmartTimerManager:
             self.timers.clear()
         
         if count == 0:
-            respond("There are no active timers.")
+            respond(say('no_timers'))
         elif count == 1:
-            respond("Timer cancelled.")
+            respond(say('timer_cancelled_plain'))
         else:
-            respond(f"All {count} timers have been cancelled.")
+            respond(say('timers_all_cancelled', count=count))
         
         return count
     
@@ -759,13 +725,13 @@ class SmartTimerManager:
             timer = self._find_timer(timer_id, label)
             if timer:
                 return self._format_timer_status(timer)
-            respond("I couldn't find that timer.")
+            respond(say('timer_not_found', what='that timer'))
             return None
         
         # Get all timers status
         with self._lock:
             if not self.timers:
-                response = "You have no active timers."
+                response = say('no_timers')
                 respond(response)
                 return response
             
@@ -780,11 +746,11 @@ class SmartTimerManager:
             for timer in self.timers.values():
                 remaining = self._format_remaining(timer.remaining_seconds)
                 if timer.label:
-                    statuses.append(f"{timer.label}: {remaining}")
+                    statuses.append(f"{timer.label.lower()}, {remaining}")
                 else:
-                    statuses.append(f"Timer {timer.id}: {remaining}")
-            
-            response = f"You have {len(self.timers)} active timers. " + ". ".join(statuses) + "."
+                    statuses.append(f"timer {timer.id}, {remaining}")
+
+            response = say('timer_status_many', count=len(self.timers), list='; '.join(statuses))
             respond(response)
             return response
     
@@ -793,17 +759,11 @@ class SmartTimerManager:
         remaining = self._format_remaining(timer.remaining_seconds)
         progress = int(timer.progress_percent)
         
-        if timer.label:
-            status = f"Your {timer.label} timer has {remaining} remaining"
-        else:
-            status = f"Your timer has {remaining} remaining"
-        
         if timer.state == TimerState.PAUSED:
-            status += " and is currently paused"
-        elif progress > 0:
-            status += f", about {progress}% complete"
-        
-        return status + "."
+            return say('timer_status_paused', name=(timer.label or 'the timer').lower(), left=remaining)
+        if timer.label:
+            return say('timer_status', name=timer.label.lower(), left=remaining)
+        return say('timer_status_plain', left=remaining)
     
     def _find_timer(self, timer_id: Optional[int], label: Optional[str]) -> Optional[SmartTimer]:
         """Find a timer by ID or label."""
@@ -825,7 +785,7 @@ class SmartTimerManager:
         
         if not timer and (timer_id or label):
             # A specific timer was requested: never act on a different one.
-            respond(f"I couldn't find {'a ' + label + ' timer' if label else 'that timer'}.")
+            respond(say('timer_not_found', what=f"a {label.lower()} timer" if label else 'that timer'))
             return False
 
         if not timer:
@@ -833,7 +793,7 @@ class SmartTimerManager:
                 if len(self.timers) == 1:
                     timer = list(self.timers.values())[0]
                 else:
-                    respond("I couldn't find that timer.")
+                    respond(say('timer_not_found', what='that timer'))
                     return False
         
         self.last_affected = [(timer, timer.remaining_seconds, timer.state)]
@@ -841,9 +801,9 @@ class SmartTimerManager:
         added_str = self._format_duration(seconds)
         
         if timer.label:
-            respond(f"Added {added_str} to your {timer.label} timer.")
+            respond(say('time_added', duration=added_str, name=timer.label.lower()))
         else:
-            respond(f"Added {added_str} to your timer.")
+            respond(say('time_added_plain', duration=added_str))
         
         return True
     
@@ -889,10 +849,8 @@ class SmartTimerManager:
             respond=respond
         )
         
-        respond(
-            f"Starting Pomodoro session {self.pomodoro_count}. "
-            f"Focus for {work // 60} minutes, then a {break_time // 60} minute {break_label}."
-        )
+        respond(say('pomodoro_started', number=self.pomodoro_count, work=work // 60, rest=break_time // 60,
+                    kind=break_label))
 
 
 # ============================================================================

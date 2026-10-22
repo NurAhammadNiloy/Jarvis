@@ -65,7 +65,7 @@ def test_timer_completion_uses_notification_adapter(timer_services):
     services.timers._complete_timer(timer)
     assert len(result.messages) == 1  # Returned results do not mutate later.
     assert len(notifications) == 2
-    assert 'complete' in notifications[-1]
+    assert 'done' in notifications[-1]
     assert not services.timers.timers
 
 
@@ -87,7 +87,7 @@ def test_followup_cancellation_uses_same_timer_service(timer_services):
     execute_query('set a timer for 5 minutes', services)
     conversation_context.set_context(topic='timer', pending_action='confirm_cancel')
     result = execute_query('yes', services)
-    assert result.messages == ('All timers have been cancelled, sir.',)
+    assert result.messages == ('All timers cancelled.',)
     assert not services.timers.timers
     assert not notifications
 
@@ -96,7 +96,7 @@ def test_weather_followup_uses_injected_provider(monkeypatch):
     services = CommandServices()
     monkeypatch.setattr(services, 'weather', Mock(return_value='Detailed weather.'))
     conversation_context.set_context(topic='forecast', city='Kokkola')
-    assert execute_query('yes', services).messages == ('Sure thing, sir. Detailed weather.',)
+    assert execute_query('yes', services).messages == ('Detailed weather.',)
     services.weather.assert_called_once_with('Kokkola', detailed=True)
 
 

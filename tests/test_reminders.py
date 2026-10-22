@@ -176,7 +176,7 @@ def test_reminder_path_needs_no_nlp_model():
 def test_create_stores_the_parsed_datetime(services, service):
     result = say(services, 'remind me to call mom tomorrow at 9 pm')
     assert result.status == 'handled'
-    assert result.messages == ('Reminder set for tomorrow at 9:00 PM: call mom.',)
+    assert result.messages == ('Done, reminding you at 9 PM tomorrow: call mom.',)
     [reminder] = pending(service)
     assert (reminder.text, reminder.due, reminder.kind, reminder.recurrence) == ('call mom', at(10, 23, 21), 'reminder', 'none')
 
@@ -188,9 +188,9 @@ def test_list_reads_back_reminders_and_alarms_with_times(services):
     result = say(services, 'what are my reminders')
     text = ' '.join(result.messages)
     assert result.status == 'handled'
-    assert 'call mom, tomorrow at 9:00 PM' in text
-    assert 'standup, every Monday at 9:00 AM' in text
-    assert 'alarm, tomorrow at 7:00 AM' in text
+    assert 'call mom, tomorrow at 9 PM' in text
+    assert 'standup, every Monday at 9 AM' in text
+    assert 'alarm, tomorrow at 7 AM' in text
 
 
 def test_reminder_fires_once_at_its_time(services, service, clock, spoken):
@@ -201,7 +201,7 @@ def test_reminder_fires_once_at_its_time(services, service, clock, spoken):
     clock.set(at(10, 22, 15))
     service.run_due()
     service.run_due()
-    assert spoken == ['Sir, this is your reminder: take a break.']
+    assert spoken == ['Time to take a break.']
     assert pending(service) == []
 
 
@@ -210,7 +210,7 @@ def test_alarm_has_distinct_wording(services, service, clock, spoken):
     clock.set(at(10, 23, 7))
     service.run_due()
     assert len(spoken) == 1
-    assert 'alarm' in spoken[0] and '7:00 AM' in spoken[0]
+    assert 'alarm' in spoken[0] and '7 AM' in spoken[0]
     assert 'reminder' not in spoken[0]
 
 
@@ -231,7 +231,7 @@ def test_same_text_reminders_are_independent(services, service, clock, spoken):
     assert first.id != second.id
     clock.set(at(10, 22, 21))
     service.run_due()
-    assert spoken == ['Sir, this is your reminder: call mom.']
+    assert spoken == ['Time to call mom.']
     assert [r.id for r in pending(service)] == [second.id]
     assert service.store.get(second.id).due == at(10, 23, 21)
 
@@ -250,7 +250,7 @@ def test_ambiguous_target_reads_back_choices_and_changes_nothing(services, servi
     result = say(services, 'delete the call mom reminder')
     text = ' '.join(result.messages)
     assert result.status == 'pending'
-    assert 'today at 9:00 PM' in text and 'tomorrow at 9:00 PM' in text and 'Which one' in text
+    assert 'today at 9 PM' in text and 'tomorrow at 9 PM' in text and 'Which one' in text
     assert len(pending(service)) == 2
     result = say(services, 'delete the call mom reminder tomorrow at 9 pm')
     assert result.status == 'handled'
@@ -276,7 +276,7 @@ def test_snooze_it_moves_the_fired_reminder_ten_minutes(services, service, clock
     assert snoozed.due == at(10, 22, 15, 10)
     clock.set(at(10, 22, 15, 10))
     service.run_due()
-    assert spoken == ['Sir, this is your reminder: take a break.'] * 2
+    assert spoken == ['Time to take a break.'] * 2
 
 
 def test_snooze_defaults_to_ten_minutes(services, service, clock):
@@ -319,7 +319,7 @@ def test_daily_reminder_advances_after_firing(services, service, clock, spoken):
     say(services, 'remind me to water plants every day at 8 am')
     clock.set(at(10, 23, 8))
     service.run_due()
-    assert spoken == ['Sir, this is your reminder: water plants.']
+    assert spoken == ['Time to water plants.']
     [reminder] = pending(service)
     assert reminder.due == at(10, 24, 8)
 
@@ -408,11 +408,11 @@ def test_migrates_legacy_json_once_and_keeps_the_file(tmp_path, clock, spoken):
 
 @pytest.mark.parametrize('first, question, answer, confirmation', [
     ('remind me to call mom', 'When should I remind you?', 'tomorrow at 9 pm',
-     'Reminder set for tomorrow at 9:00 PM: call mom.'),
+     'Done, reminding you at 9 PM tomorrow: call mom.'),
     ('remind me to call mom at 5', 'Did you mean 5 a.m. or p.m.?', 'p.m.',
-     'Reminder set for today at 5:00 PM: call mom.'),
+     'Done, reminding you at 5 PM: call mom.'),
     ('set an alarm', 'What time should I set the alarm for?', '7am',
-     'Alarm set for tomorrow at 7:00 AM.'),
+     'Alarm set for 7 AM tomorrow.'),
 ])
 def test_voice_follow_up_completes_the_request(services, service, first, question, answer, confirmation):
     from core.assistant import Assistant
@@ -430,9 +430,9 @@ def test_voice_follow_up_completes_the_request(services, service, first, questio
 
 
 @pytest.mark.parametrize('phrase, message', [
-    ('remind me to pay rent on December 20 at 9 am', 'Reminder set for Sunday, December 20 at 9:00 AM: pay rent.'),
-    ('remind me to drink water every hour', 'Reminder set for every hour on the hour, next today at 3:00 PM: drink water.'),
-    ('remind me to water plants every day at 8 am', 'Reminder set for every day at 8:00 AM: water plants.'),
+    ('remind me to pay rent on December 20 at 9 am', 'Done, reminding you on December 20 at 9 AM: pay rent.'),
+    ('remind me to drink water every hour', 'Done, reminding you every hour on the hour, next today at 3 PM: drink water.'),
+    ('remind me to water plants every day at 8 am', 'Done, reminding you every day at 8 AM: water plants.'),
 ])
 def test_confirmation_wording(services, phrase, message):
     assert say(services, phrase).messages == (message,)
@@ -454,13 +454,13 @@ def test_startup_summary(services, service):
         service.startup_summary() == 'You have 1 pending: alarm tomorrow at 11:26 AM.'
     say(services, "remind me to drink water at 6 pm")
     summary = service.startup_summary()
-    assert summary.startswith('You have 2 pending: ') and "reminder 'drink water' today at 6:00 PM" in summary
+    assert summary.startswith('You have 2 pending: ') and "reminder 'drink water' today at 6 PM" in summary
 
 
 def test_startup_summary_with_many_gives_count_and_next(services, service):
     for hour in range(15, 20):
         say(services, f'remind me to stretch at {hour}:00')
-    assert service.startup_summary() == "You have 5 pending. The next is reminder 'stretch' today at 3:00 PM."
+    assert service.startup_summary() == "You have 5 pending. The next is reminder 'stretch' today at 3 PM."
 
 
 def test_main_speaks_the_summary_after_restoring(monkeypatch):

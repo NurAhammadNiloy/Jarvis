@@ -19,7 +19,9 @@ class TextNotifications:
         self.speak = output
 
     def milestone(self, timer_label, message, remaining_seconds, remaining_fn):
-        self.speak(f"{timer_label or 'Timer'} timer: {message}.")
+        from core.phrases import say
+        self.speak(say('timer_milestone', name=timer_label.lower(), message=message) if timer_label
+                   else say('timer_milestone_plain', message=message))
 
     def completion(self, timer_label, message, category=None):
         self.speak(message)

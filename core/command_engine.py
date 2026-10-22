@@ -7,6 +7,7 @@ from config.settings import DEFAULT_LOCATION
 from core.command_result import Command, CommandResult
 from core.command_services import CommandServices
 from core.intent_classifier import route
+from core.phrases import say
 from core.service_errors import ServiceError
 
 # The alarm intent covers every alarm request; these pick the operation.
@@ -34,6 +35,17 @@ def _from_alarm_words(query):
     if match and match.start() > 0 and not _TIME_WORDS.search(query[:match.start()]):
         return query[match.start():]
     return query
+
+
+def spoken_clock(moment):
+    """'1:10 PM', '9 AM'."""
+    return moment.strftime('%I:%M %p').lstrip('0').replace(':00 ', ' ')
+
+
+def spoken_date(moment, today):
+    """'Thursday, October 22' (with the year only when it is not this year)."""
+    text = f"{moment:%A}, {moment:%B} {moment.day}"
+    return text if moment.year == today.year else f"{text}, {moment.year}"
 
 
 def understand_query(query, services, default_location=DEFAULT_LOCATION):
@@ -101,7 +113,7 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         task, due, question = args.get('task'), args.get('due'), args.get('question')
         if due is not None and not task and args.get('kind', 'reminder') != 'alarm':
             # A reminder needs something to remind about; the time is kept for the answer.
-            return reply("What should I remind you about?", status="pending", pending_action="reminder_task",
+            return reply(say("ask_reminder_task"), status="pending", pending_action="reminder_task",
                          data={"args": dict(args)})
         if due is not None:
             return action_reply(services.reminder(args))
@@ -110,10 +122,10 @@ boundary. Clock and response choice can be fixed for deterministic tests.
             return reply(question, status="pending", pending_action="reminder_time",
                          data={"task": task, "query": query})
         if task:
-            return reply("What time should I set the alarm for?" if intent == "alarm" else "When should I remind you?",
+            return reply(say("ask_alarm_time") if intent == "alarm" else say("ask_reminder_time"),
                          status="pending",
                          pending_action="reminder_time", data={"task": task})
-        return reply("I couldn't understand the reminder. Please try again with a task and time.", status="error")
+        return reply(say("reminder_unclear"), status="error")
     if intent == "list_reminders":
         return action_reply(services.list_reminders())
     if intent == "delete_reminder":
@@ -123,7 +135,7 @@ boundary. Clock and response choice can be fixed for deterministic tests.
                                                      args.get("when_text", "")))
     if intent in ("weather", "forecast"):
         if not args['city']:
-            return reply("I couldn't determine your location. Please tell me the city for the weather update.")
+            return reply(say("which_city"))
         response = services.weather(**args) if intent == "weather" else services.forecast(args['city'])
         services.set_context(topic=intent, city=args['city'], query=query, response=response)
         return reply(response)
@@ -132,34 +144,35 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         topic = args['topic']
         if url:
             if not services.open_url(url):
-                return reply("I found the video but couldn't open your browser.", status="error")
-            return reply(f"Playing {topic} on YouTube." if topic else "Opening YouTube.")
-        return reply(f"I couldn't find {topic} on YouTube." if topic else "Couldn't find that video.",
-                     status="error")
+                return reply(say("no_browser"), status="error")
+            return reply(say("playing", topic=topic) if topic else say("opening_youtube"))
+        return reply(say("youtube_not_found", topic=topic or "that video"), status="error")
     if intent == "time":
-        return reply(f"The current time is {now().strftime('%I:%M %p')}.")
+        return reply(say("time", time=spoken_clock(now())))
     if intent == "date":
         lower = query.lower()
+        today = now()
+        day = lambda offset: spoken_date(today + timedelta(days=offset), today)  # noqa: E731
         # "day after tomorrow" contains "tomorrow", so it must be checked first.
         if "day after tomorrow" in lower:
-            return reply(f"The day after tomorrow is {(now() + timedelta(days=2)).strftime('%B %d, %Y')}.")
+            return reply(say("date_day_after", date=day(2)))
         if "tomorrow" in lower:
-            return reply(f"Tomorrow's date is {(now() + timedelta(days=1)).strftime('%B %d, %Y')}.")
+            return reply(say("date_tomorrow", date=day(1)))
         if "yesterday" in lower:
-            return reply(f"Yesterday's date was {(now() - timedelta(days=1)).strftime('%B %d, %Y')}.")
-        return reply(f"Today's date is {now().strftime('%B %d, %Y')}.")
+            return reply(say("date_yesterday", date=day(-1)))
+        return reply(say("date_today", date=day(0)))
     if intent == "google":
         if not services.open_url("https://www.google.com"):
-            return reply("I couldn't open your browser.", status="error")
-        return reply("Opening Google.")
+            return reply(say("no_browser"), status="error")
+        return reply(say("opening_google"))
     if intent == "timer" or intent in TIMER_ACTIONS:
         action = args['action']
         seconds = (args.get('duration') or (None, None))[0]
         if action in ("set", "add_time") and seconds is not None and seconds <= 0:
-            return reply("A timer needs a duration greater than zero.", status="error",
+            return reply(say("timer_zero"), status="error",
                          error="invalid_duration")
         if action == "add_time" and not seconds:
-            return reply("How much time would you like to add?")
+            return reply(say("add_how_much"))
         return action_reply(services.timer_action(action, query, args))
     if intent == "thank":
         return reply(services.thanks(choose))

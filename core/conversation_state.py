@@ -15,6 +15,7 @@ from typing import Optional
 
 from core.command_result import Command
 from core.conversation_log import record
+from core.phrases import PHRASES, say
 from core.voice_policy import means_stop, stop_heard, strip_wake_word, words
 
 
@@ -172,7 +173,7 @@ IDLE = Idle()
 # filter drops a "yes" heard while Jarvis is saying "yes".
 # The confirmation question used until 22 Oct; its echo still turns up in answers.
 _OLD_PROMPT = 'Shall I do that?'
-REPROMPT = "Sorry, I didn't catch that. Should I go ahead?"
+REPROMPT = PHRASES['reask'][0]
 
 
 @dataclass(frozen=True)
@@ -240,7 +241,7 @@ class ConversationState:
             return Answer('execute', command=state.command)
         if kind == 'no':
             self.clear('declined')
-            return Answer('reply', text="Okay, I won't do that.")
+            return Answer('reply', text=say('declined'))
         return None  # something else: a correction or a new request
 
     def _check_choice(self, state, recognition, text):
@@ -252,7 +253,7 @@ class ConversationState:
         kind = answer_kind(answer)
         if kind == 'no' and answer_reliable(recognition, 'no', state.prompt):
             self.clear('declined')
-            return Answer('reply', text="Okay, I'll leave it.")
+            return Answer('reply', text=say('declined'))
         if kind == 'yes' or index is None and len(words(answer)) <= 2:
-            return Answer('reply', text='Sorry, which one? ' + state.prompt)
+            return Answer('reply', text=say('which_one', question=state.prompt))
         return None  # a new request

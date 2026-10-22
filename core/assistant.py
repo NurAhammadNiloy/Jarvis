@@ -12,6 +12,7 @@ from core.conversation_state import ConversationState, stop_threshold
 from core.voice_policy import ConfidenceGate, VoiceDecision, stop_heard, strip_wake_word, words
 from core.conversation_log import record
 from core.intent_classifier import READ_ONLY_INTENTS, route
+from core.phrases import say
 
 
 class Assistant:
@@ -113,7 +114,7 @@ class Assistant:
             self.active_conversation = True
             self.last_active_time = self.clock()
             self.speech.stop()
-            self.output(random.choice(['At your service, sir.', 'How can I help, sir?']))
+            self.output(say('greeting'))
             return True
         if recognition.error == 'unrecognized':
             # Background noise must not speak or extend the session. Only when
@@ -128,7 +129,7 @@ class Assistant:
                 record('voice_decision', decision='ignore', reason='repeated_unrecognized_audio', text='')
                 return False
             self._recognition_failure_prompted = True
-            prompt = "I couldn't hear that. " + self.state.current.prompt
+            prompt = say('not_heard_then', question=self.state.current.prompt)
             record('voice_decision', decision='clarify', reason='unrecognized_audio', text='', prompt=prompt)
             self.output(prompt)
             return True
@@ -144,7 +145,7 @@ class Assistant:
             self.speech.stop()
             self.active_conversation = True
             self.last_active_time = self.clock()
-            self.output("I can't control YouTube playback yet.")
+            self.output(say('no_media_control'))
             return True
         if stop_heard(recognition, stop_threshold(recognition)):
             # 'Jarvis stop Jarvis', 'Genesis stop' (0.40, heard over Jarvis): stop.
@@ -220,7 +221,7 @@ class Assistant:
         self.last_active_time = self.clock()
         self.speech.stop(expected_id=recognition.playback_id)
         if answer.kind == 'cancel':
-            self.output('Cancelled.')
+            self.output(say('cancelled'))
         elif answer.kind == 'reply':
             self.output(answer.text)
         else:
@@ -244,7 +245,7 @@ class Assistant:
         self.last_active_time = self.clock()
         self.speech.stop()
         if not self._clear_slot_answer(recognition, state, command):
-            self.output("I'm not sure I heard that. " + state.prompt)
+            self.output(say('not_sure_then', question=state.prompt))
         elif question:  # progress, e.g. "Did you mean 6 a.m. or p.m.?"
             self.state.await_slot(state.intent, state.slot, completed, question)
             self.output(question)
@@ -292,7 +293,7 @@ class Assistant:
         self.last_active_time = self.clock()
         self.speech.stop()
         if len(chosen) != 1 or recognition.confidence is not None and recognition.confidence < 0.5:
-            self.output('Which one: ' + _list_timers(timers) + '?')
+            self.output(say('which_timer', timers=_list_timers(timers)))
             return True
         timer = chosen[0]
         self.state.clear('filled')
@@ -332,8 +333,8 @@ class Assistant:
         if args.get('question'):
             return args['question']
         if command.intent == 'alarm':
-            return 'What time should I set the alarm for?'
-        return 'When should I remind you?' if args.get('task') else None
+            return say('ask_alarm_time')
+        return say('ask_reminder_time') if args.get('task') else None
 
     @staticmethod
     def _understood(command):
@@ -461,20 +462,20 @@ class Assistant:
         self.speech.stop()
         last, self._last_action = self._last_action, None
         if last is None or self.clock() - last[1] > self.undo_window:
-            self.output("There's nothing to undo.")
+            self.output(say('nothing_to_undo'))
             return True
         undo, _, intent = last
         if undo is None:
-            self.output("Sorry, I can't undo that.")
+            self.output(say('cannot_undo'))
             return True
         try:
             undo()
         except Exception as exc:
             record('undo_failed', intent=intent, error=type(exc).__name__)
-            self.output("Sorry, I couldn't undo that.")
+            self.output(say('undo_failed'))
             return True
         record('undone', intent=intent)
-        self.output('Undone.')
+        self.output(say('undone'))
         return True
 
     def _describe(self, command):
@@ -511,9 +512,9 @@ class Assistant:
         if turn.proposal:
             # The model's words about a proposal are never spoken on their own: if the
             # proposal cannot run, they might describe something that did not happen.
-            reply = self._propose(turn.proposal) or "Sorry, I couldn't work out what to do. Could you say it again?"
+            reply = self._propose(turn.proposal) or say('cannot_work_out')
         else:
-            reply = turn.reply or "I couldn't work out that request. Could you say it again?"
+            reply = turn.reply or say('cannot_work_out')
         self.active_conversation = True
         self.last_active_time = self.clock()
         self.speech.stop()

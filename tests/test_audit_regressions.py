@@ -24,12 +24,12 @@ def services():
 
 def test_day_after_tomorrow_is_two_days_ahead(services):
     result = execute_query("what's the date day after tomorrow", services, now=NOW)
-    assert result.messages == ('The day after tomorrow is October 23, 2026.',)
+    assert result.messages == ('The day after tomorrow is Friday, October 23.',)
 
 
 def test_tomorrow_is_still_one_day_ahead(services):
     result = execute_query("what is tomorrow's date", services, now=NOW)
-    assert result.messages == ("Tomorrow's date is October 22, 2026.",)
+    assert result.messages == ('Tomorrow is Thursday, October 22.',)
 
 
 def test_unpause_the_pasta_timer_resumes():
@@ -63,7 +63,7 @@ def test_cancel_unknown_label_does_not_cancel_the_only_timer(manager):
     manager.create_timer('set a pasta timer for 10 minutes', label='Pasta', respond=lambda m: None)
     ok, messages = spoken(manager.cancel_timer, label='Laundry')
     assert ok is False
-    assert 'Laundry' in messages[0]
+    assert 'laundry' in messages[0]
     assert len(manager.timers) == 1
 
 
@@ -79,7 +79,7 @@ def test_pause_and_resume_unknown_label_report_not_found(manager, method):
     manager.create_timer('set a pasta timer for 10 minutes', label='Pasta', respond=lambda m: None)
     ok, messages = spoken(getattr(manager, method), label='Laundry')
     assert ok is False
-    assert 'Laundry' in messages[0]
+    assert 'laundry' in messages[0]
 
 
 def test_add_time_unknown_label_does_not_extend_the_only_timer(manager):

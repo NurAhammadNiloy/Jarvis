@@ -17,6 +17,7 @@ import re
 import threading
 
 from core.command_result import ActionResult
+from core.phrases import say
 from core.reminder_parser import WEEKDAYS, find_clock, find_day, local_now
 
 MAX_WAIT_SECONDS = 60
@@ -55,8 +56,30 @@ def next_occurrence(due, recurrence, weekday, after, zone):
     return candidate
 
 
+# Tasks that start with one of these read well as "Time to <task>."
+_VERBS = {'call', 'drink', 'take', 'go', 'check', 'stretch', 'stand', 'buy', 'pay', 'pick', 'send',
+          'email', 'water', 'feed', 'walk', 'eat', 'start', 'stop', 'meet', 'book', 'clean', 'cook',
+          'leave', 'get', 'do', 'make', 'finish', 'submit', 'review', 'delete', 'read', 'write', 'move',
+          'turn', 'put', 'bring', 'prepare', 'text', 'reply', 'wake', 'sleep', 'rest', 'study'}
+
+
 def clock_text(moment):
-    return moment.strftime('%I:%M %p').lstrip('0')
+    """'9 AM', '1:20 PM': how people say it."""
+    text = moment.strftime('%I:%M %p').lstrip('0')
+    return text.replace(':00 ', ' ')
+
+
+def spoken_when(moment, now):
+    """'at 1:20 PM', 'at 9 AM tomorrow', 'on Friday at 9 AM', 'on December 20 at 9 AM'."""
+    days = (moment.date() - now.date()).days
+    if days == 0:
+        return f"at {clock_text(moment)}"
+    if days == 1:
+        return f"at {clock_text(moment)} tomorrow"
+    if 1 < days < 7:
+        return f"on {moment:%A} at {clock_text(moment)}"
+    return f"on {moment:%B} {moment.day}" + (f", {moment.year}" if moment.year != now.year else '') + \
+        f" at {clock_text(moment)}"
 
 
 def describe_when(moment, now):
@@ -172,12 +195,17 @@ class ReminderService:
     def _announcement(self, reminder, now, missed):
         if reminder.kind == 'alarm':
             if missed:
-                return f"While I was offline, your alarm for {describe_when(reminder.due, now)} went off."
-            return f"Sir, it's {clock_text(reminder.due)}. This is your alarm." + (
-                f" {reminder.text}." if reminder.text else '')
+                return say('alarm_missed', when=describe_when(reminder.due, now))
+            if reminder.text:
+                return say('alarm_due_named', time=clock_text(reminder.due), label=reminder.text)
+            return say('alarm_due', time=clock_text(reminder.due))
         if missed:
-            return f"While I was offline, you missed a reminder {describe_when(reminder.due, now)}: {reminder.text}."
-        return f"Sir, this is your reminder: {reminder.text}."
+            return say('reminder_missed', when=describe_when(reminder.due, now), task=reminder.text)
+        task = reminder.text or ''
+        if not task or task.lower() == 'reminder':
+            return say('reminder_due_plain')
+        first = task.split()[0].lower()
+        return say('reminder_due' if first in _VERBS else 'reminder_due_noun', task=task)
 
     # --- operations by id --------------------------------------------------
 
@@ -188,12 +216,14 @@ class ReminderService:
         self._changed()
         reminder = self.store.get(reminder_id)
         undo = lambda: self._set_status(reminder_id, 'cancelled')  # noqa: E731
-        when = describe(reminder, self.now())
-        when = when[3:] if when.startswith('on ') else when  # "set for Sunday", not "for on Sunday"
+        now = self.now()
+        when = describe(reminder, now) if reminder.recurrence != 'none' else spoken_when(reminder.due, now)
         if reminder.kind == 'alarm':
-            return ActionResult((f"Alarm set for {when}." + (f" {reminder.text}." if reminder.text else ''),),
-                                undo=undo)
-        return ActionResult((f"Reminder set for {when}: {reminder.text}.",), undo=undo)
+            if reminder.text:
+                return ActionResult((say('alarm_set_named', when=when.removeprefix('at '), label=reminder.text),),
+                                    undo=undo)
+            return ActionResult((say('alarm_set', when=when.removeprefix('at ')),), undo=undo)
+        return ActionResult((say('reminder_set', when=when, task=reminder.text),), undo=undo)
 
     def _set_status(self, reminder_id, status):
         self.store.set_status(reminder_id, status)
@@ -215,16 +245,16 @@ class ReminderService:
                 f"alarm '{r.text}'" if r.kind == 'alarm' else f"reminder '{r.text or 'reminder'}'")
             return f"{what} {describe(r, now)}"
         if len(items) > limit:
-            return f"You have {len(items)} pending. The next is {part(items[0])}."
-        return f"You have {len(items)} pending: " + ', '.join(part(r) for r in items) + '.'
+            return say('startup_pending_many', count=len(items), item=part(items[0]))
+        return say('startup_pending', count=len(items), items=', '.join(part(r) for r in items))
 
     def list_reminders(self, kind=None):
         now = self.now()
         items = [r for r in self.store.pending() if kind in (None, r.kind)]
         noun = 'alarm' if kind == 'alarm' else 'reminder'
         if not items:
-            return ActionResult((f"You have no {noun}s.",))
-        heading = f"You have {len(items)} {noun}{'s' if len(items) != 1 else ''}."
+            return ActionResult((say('no_reminders', noun=noun),))
+        heading = say('reminders_heading', count=len(items), noun=noun, s='s' if len(items) != 1 else '')
         return ActionResult((heading,) + tuple(f"{label(r)}, {describe(r, now)}." for r in items))
 
     def delete(self, target=None, when_text='', kind=None):
@@ -236,7 +266,7 @@ class ReminderService:
             return self._which(matches, noun, 'delete')
         reminder = matches[0]
         self._set_status(reminder.id, 'cancelled')  # a soft delete, so it can be undone
-        return ActionResult((f"Deleted: {label(reminder)}, {describe(reminder, self.now())}.",),
+        return ActionResult((say('reminder_deleted', label=label(reminder), when=describe(reminder, self.now())),),
                             undo=lambda: self._set_status(reminder.id, reminder.status))
 
     def snooze(self, target=None, minutes=10, when_text=''):
@@ -265,8 +295,7 @@ class ReminderService:
                 self.store.set_due(reminder.id, reminder.due, reminder.status)
                 self._changed()
         self._changed()
-        return ActionResult((f"Snoozed for {minutes} minute{'s' if minutes != 1 else ''}. "
-                             f"I'll remind you {describe_when(due, now)}.",), undo=undo)
+        return ActionResult((say('reminder_snoozed', when=spoken_when(due, now), time=clock_text(due)),), undo=undo)
 
     def _matches(self, target, when_text='', kind=None, include_fired=False):
         now = self.now()
@@ -293,16 +322,16 @@ class ReminderService:
 
     def _not_found(self, target, noun):
         if target:
-            return ActionResult((f"I couldn't find a {noun} about {target}.",), False)
-        return ActionResult((f"I couldn't find that {noun}.",), False)
+            return ActionResult((say('reminder_not_found', noun=noun, target=target),), False)
+        return ActionResult((say('reminder_not_found_plain', noun=noun),), False)
 
     def _which(self, matches, noun, verb):
         now = self.now()
         options = '; '.join(f"{label(r)}, {describe(r, now)}" for r in matches[:5])
         if len(matches) > 5:
             options += f"; and {len(matches) - 5} more"
-        return ActionResult((f"I found {len(matches)} {noun}s: {options}. Which one should I {verb}? "
-                             f"Please say it again with the day or time.",), False, pending=True)
+        return ActionResult((say('reminder_which', count=len(matches), noun=noun, options=options, verb=verb),),
+                            False, pending=True)
 
 
 def get_service(notify=None):

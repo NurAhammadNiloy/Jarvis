@@ -47,12 +47,12 @@ def test_fast_path_line_has_intent_path_window_and_timings():
         started(1),
         ('voice_decision', {'decision': 'accept'}),
         ('command_result', {'intent': 'delete_reminder', 'status': 'handled'}),
-        *said(4, 'Deleted: call mom, today at 9:00 PM.'),
+        *said(4, 'Deleted: call mom, today at 9 PM.'),
         finished(1), 0.5,
         ('playback_chunk_started', {'playback_id': 4}),
     ])
     assert lines == ['You (heard): "delete my call mom reminder"  conf 0.82 | intent delete_reminder | fast path'
-                     ' | active 10s | stt 0.9s, total 1.4s | Jarvis: "Deleted: call mom, today at 9:00 PM."']
+                     ' | active 10s | stt 0.9s, total 1.4s | Jarvis: "Deleted: call mom, today at 9 PM."']
 
 
 def test_rejected_and_ignored_audio_show_the_reason():
@@ -122,8 +122,8 @@ def test_partials_are_not_shown_and_an_utterance_never_handled_is_reported():
 
 
 def test_replies_nobody_asked_for_get_their_own_line():
-    lines = feed([('speech_queued', {'playback_id': 3, 'text': 'Sir, this is your reminder: stretch.'})])
-    assert lines == ['Jarvis: Sir, this is your reminder: stretch.']
+    lines = feed([('speech_queued', {'playback_id': 3, 'text': 'Time to stretch.'})])
+    assert lines == ['Jarvis: Time to stretch.']
 
 
 def test_listener_receives_events_without_a_log_file_and_errors_are_contained():
@@ -154,7 +154,7 @@ def test_answers_to_a_pending_state_show_what_they_answered():
         recognition(1, '2 minutes from now', 0.94), started(1),
         ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'fill'}),
         ('command_result', {'intent': 'alarm', 'status': 'handled'}),
-        *said(2, 'Alarm set for today at 10:38 AM.'),
+        *said(2, 'Alarm set for 10:38 AM.'),
         finished(1),
         ('playback_chunk_started', {'playback_id': 2}),
         recognition(2, 'Jarvis stop', 0.73), started(2),
@@ -165,7 +165,7 @@ def test_answers_to_a_pending_state_show_what_they_answered():
     ])
     assert lines[0].startswith('You (heard): "2 minutes from now"  conf 0.94 | intent alarm'
                                ' | answer (awaiting time for alarm)')
-    assert lines[0].endswith('Jarvis: "Alarm set for today at 10:38 AM."')
+    assert lines[0].endswith('Jarvis: "Alarm set for 10:38 AM."')
     assert ' | cancelled | ' in lines[1] and lines[1].endswith('Jarvis: "Cancelled."')
 
 
@@ -186,7 +186,7 @@ def test_every_line_without_words_says_what_happened():
         ('voice_filter', {'reason': 'nothing_after_playback', 'uid': 1}),
         recognition(2, '', error='unrecognized'), started(2),
         ('voice_decision', {'decision': 'clarify', 'reason': 'unrecognized_audio'}),
-        *said(3, "I couldn't hear that. What time should I set the alarm for?"), finished(2),
+        *said(3, "Sorry? What time should I set the alarm for?"), finished(2),
         ('playback_chunk_started', {'playback_id': 3}),
         ('turn_started', {'uid': 3, 'text': '', 'error': 'stale_recording'}),
         ('voice_decision', {'decision': 'clarify', 'reason': 'stale_recording'}), finished(3),
@@ -196,7 +196,7 @@ def test_every_line_without_words_says_what_happened():
     assert lines == [
         'You (ignored: nothing clear after Jarvis stopped (speakers mode)): "(unrecognized)"  conf -',
         'You (not understood): "(unrecognized)"  conf - | clarification (unrecognized audio) | active 10s'
-        ' | Jarvis: "I couldn\'t hear that. What time should I set the alarm for?"',
+        ' | Jarvis: "Sorry? What time should I set the alarm for?"',
         'You (not understood): "(recording too old to use)"  conf - | clarification (stale recording) | active 10s',
         'You (not understood): "(incomplete recording)"  conf - | clarification (incomplete recording) | active 10s',
     ]

@@ -10,6 +10,7 @@ from datetime import datetime, time, timedelta
 import re
 from typing import Optional
 
+from core.phrases import say
 from core.smart_timer import _words_to_digits
 
 WEEKDAYS = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')
@@ -238,14 +239,14 @@ def parse_reminder(text, now):
             days = amount * (7 if unit.startswith('week') else 1)
             day = now.date() + timedelta(days=int(days))
             if not clock:
-                return ask(f"What time should I set the {noun} for?")
+                return ask(say('ask_time_for', noun=noun))
             hour = _resolve_hour(clock[0], clock[2], text)
             if hour is None:
                 return ask(_meridiem_question(clock))
             return ReminderRequest(task, _at(day, hour, clock[1], zone), recurrence, weekday, kind)
         seconds = amount * {'s': 1, 'm': 60, 'h': 3600}[unit[0]]
         if seconds <= 0:
-            return ask(f"When should I set the {noun} for?")
+            return ask(say('ask_when_for', noun=noun))
         due = (now + timedelta(seconds=seconds)).replace(microsecond=0)
         return ReminderRequest(task, due, recurrence, weekday, kind)
 
@@ -258,7 +259,7 @@ def parse_reminder(text, now):
 
     if not clock:
         if date_kind or recurrence != 'none' or kind == 'alarm':
-            return ask(f"What time should I set the {noun} for?")
+            return ask(say('ask_time_for', noun=noun))
         return ReminderRequest(task, None, recurrence, weekday, kind)
     hour = _resolve_hour(clock[0], clock[2], text)
     if hour is None:
@@ -276,7 +277,7 @@ def parse_reminder(text, now):
 
     if date_kind == 'calendar':
         if date_value is None:
-            return ask(f"Which date should I set the {noun} for?")
+            return ask(say('ask_date_for', noun=noun))
         due = _at(date_value, hour, minute, zone)
     elif date_kind == 'weekday':
         due = _at(_next_weekday(today, date_value), hour, minute, zone)
@@ -288,16 +289,16 @@ def parse_reminder(text, now):
         due = _at(today, hour, minute, zone)
         if due <= now:
             if date_kind == 'today':
-                return ask(f"That time has already passed today. When should I set the {noun} for?")
+                return ask(say('time_passed_today', noun=noun))
             due = _at(today + timedelta(days=1), hour, minute, zone)
     if due <= now:
-        return ask(f"That time has already passed. When should I set the {noun} for?")
+        return ask(say('time_passed', noun=noun))
     return ReminderRequest(task, due, recurrence, weekday, kind)
 
 
 def _meridiem_question(clock):
     spoken = f"{clock[0]}:{clock[1]:02d}" if clock[1] else str(clock[0])
-    return f"Did you mean {spoken} a.m. or p.m.?"
+    return say('am_or_pm', time=spoken)
 
 
 def _has_words(text):

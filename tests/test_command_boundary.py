@@ -50,10 +50,10 @@ def services():
 
 
 @pytest.mark.parametrize('query,expected', [
-    ('what time is it', 'The current time is 02:30 PM.'),
-    ("what is today's date", "Today's date is September 09, 2026."),
-    ("what is tomorrow's date", "Tomorrow's date is September 10, 2026."),
-    ("what was yesterday's date", "Yesterday's date was September 08, 2026."),
+    ('what time is it', "It's 2:30 PM."),
+    ("what is today's date", "It's Wednesday, September 9."),
+    ("what is tomorrow's date", 'Tomorrow is Thursday, September 10.'),
+    ("what was yesterday's date", 'Yesterday was Tuesday, September 8.'),
     ('what you are doing', 'Just here, ready to assist you, boss.'),
     ('thank you', 'You are welcome.'),
 ])
@@ -107,13 +107,13 @@ def test_timer_dispatch(services, query, action):
 def test_timer_missing_add_duration_does_not_execute(services):
     services.extract_timer_info.return_value.update(action='add_time', duration=(None, None))
     result = execute_query('add time to timer', services)
-    assert result.messages == ('How much time would you like to add?',)
+    assert result.messages == ('How much time should I add?',)
     services.timer_action.assert_not_called()
 
 
 def test_browser_and_youtube_actions_execute_once(services):
     result = execute_query('play lofi on youtube', services)
-    assert result.messages == ('Playing lofi on YouTube.',)
+    assert result.messages == ('Playing lofi.',)
     services.youtube.assert_called_once_with('play lofi on youtube')
     services.open_url.assert_called_once_with(services.youtube.return_value)
     services.open_url.reset_mock()
@@ -123,7 +123,7 @@ def test_browser_and_youtube_actions_execute_once(services):
 
 def test_youtube_no_result_does_not_open_browser(services):
     services.youtube.return_value = None
-    assert execute_query('play lofi', services).messages == ("I couldn't find lofi on YouTube.",)
+    assert execute_query('play lofi', services).messages == ("Couldn't find lofi on YouTube.",)
     services.open_url.assert_not_called()
 
 
@@ -194,8 +194,10 @@ class Guard(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Guard())
 from core.command_engine import execute_query
 from core.intent_handler import handle_query
-assert execute_query('time', now=lambda:datetime(2026,9,9,14,30)).messages == ('The current time is 02:30 PM.',)
-assert execute_query('timer status').messages == ('You have no active timers.',)
+import core.phrases
+core.phrases._choose = lambda variants: variants[0]
+assert execute_query('time', now=lambda:datetime(2026,9,9,14,30)).messages == ("It's 2:30 PM.",)
+assert execute_query('timer status').messages == ('No timers running.',)
 messages=[]
 assert handle_query('what time is it', output=messages.append) is True
 assert len(messages)==1

@@ -190,7 +190,7 @@ def test_an_unparseable_reply_is_logged_raw(monkeypatch):
     monkeypatch.setattr('core.conversation_log.record', lambda event, **fields: events.append((event, fields)))
     turn = Dialogue(Mock(return_value='I think you want to pause it.'), clock=lambda: 0).turn(
         Recognition('Falls the pasta timer', 0.6))
-    assert turn.reply == "Sorry, I lost my train of thought. Could you say that again?" and not turn.proposal
+    assert turn.reply == "Sorry, I lost my train of thought. Say that again?" and not turn.proposal
     (event, fields), = [e for e in events if e[0] == 'dialogue_error']
     assert fields['raw'] == 'I think you want to pause it.' and fields['error'] == 'ValueError'
 

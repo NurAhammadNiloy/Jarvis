@@ -267,4 +267,4 @@ def test_youtube_with_no_results_is_not_reported_as_handled():
     services.youtube.return_value = None
     result = execute_query('play lofi music on youtube', services)
     assert result.status == 'error'
-    assert result.messages == ("I couldn't find lofi music on YouTube.",)
+    assert result.messages == ("Couldn't find lofi music on YouTube.",)

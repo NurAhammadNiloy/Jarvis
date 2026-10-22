@@ -232,7 +232,7 @@ def test_pending_time_answer_is_confidence_checked_before_execution():
     assistant.state.await_slot('create_reminder', 'time', 'remind me to call mom', 'When should I remind you?')
     assistant.process_recognition(Recognition('5pm', 0.2))
     services.reminder.assert_not_called()
-    output.assert_called_once_with("I'm not sure I heard that. When should I remind you?")
+    output.assert_called_once_with("Sorry? When should I remind you?")
     assert assistant.state.pending
 
 
@@ -265,7 +265,7 @@ def test_repeated_recognition_failures_do_not_spam_or_extend_session():
     now[0] = 50
     for _ in range(5):
         assistant.process_recognition(Recognition(error='unrecognized'))
-    output.assert_called_once_with("I couldn't hear that. What time should I set the alarm for?")
+    output.assert_called_once_with("Sorry? What time should I set the alarm for?")
     assert assistant.last_active_time == 0
     assistant.process_recognition(Recognition('Jarvis', 0.7))
     assistant.process_recognition(Recognition(error='unrecognized'))
@@ -279,7 +279,7 @@ def test_passive_noise_and_incomplete_wake_do_not_greet():
     assert not assistant.process_recognition(Recognition('Jarvis', 0.2), passive=True)
     output.assert_not_called()
     assistant.process_recognition(Recognition('Jarvis', 0.99, truncated=True), passive=True)
-    assert 'incomplete' in output.call_args.args[0]
+    assert 'missed the end' in output.call_args.args[0]
     assert services.mock_calls == []
 
 

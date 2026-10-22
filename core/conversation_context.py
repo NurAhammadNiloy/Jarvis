@@ -6,6 +6,7 @@ For example, after giving a weather forecast, if user says "yes" or
 "tell me more", Jarvis understands the context.
 """
 
+from core.phrases import say
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
@@ -122,10 +123,10 @@ def get_follow_up_response(user_input: str, *, weather=None, forecast=None,
             # Give current weather as follow-up
             response = weather(city, detailed=True)
             clear_context()
-            return f"Sure thing, sir. {response}"
+            return response
         elif is_no:
             clear_context()
-            return "Alright, sir. Let me know if you need anything else."
+            return say('okay')
     
     elif _state.last_topic == "weather":
         if wants_more or "forecast" in user_lower:
@@ -137,10 +138,10 @@ def get_follow_up_response(user_input: str, *, weather=None, forecast=None,
             return response
         elif is_yes:
             clear_context()
-            return "Glad I could help, sir. Anything else you'd like to know?"
+            return say('glad')
         elif is_no:
             clear_context()
-            return "Understood, sir. I'm here if you need me."
+            return say('okay')
     
     elif _state.last_topic == "timer":
         if is_yes and _state.pending_action == "confirm_cancel":
@@ -149,18 +150,18 @@ def get_follow_up_response(user_input: str, *, weather=None, forecast=None,
                 from core.smart_timer import cancel_all_timers as cancel_timers
             cancel_timers()
             clear_context()
-            return "All timers have been cancelled, sir."
+            return say('all_timers_cancelled')
         elif is_no and _state.pending_action:
             clear_context()
-            return "Alright, I'll leave them running."
+            return say('timers_keep_running')
     
     elif _state.last_topic == "youtube":
         if is_yes or wants_more:
             clear_context()
-            return "Would you like me to play something else?"
+            return say('play_what')
         elif is_no:
             clear_context()
-            return "Alright, sir. Enjoy!"
+            return say('enjoy')
     
     # Generic follow-ups
     if is_yes:
@@ -168,10 +169,10 @@ def get_follow_up_response(user_input: str, *, weather=None, forecast=None,
         return None  # Let it go to ChatGPT
     elif is_no:
         clear_context()
-        return "Alright, sir. Just let me know if you need anything."
+        return say('okay')
     elif wants_more:
         clear_context()
-        return "Could you be more specific about what you'd like to know more about?"
+        return say('more_about_what')
     
     return None  # No contextual response, proceed normally
 
@@ -180,20 +181,7 @@ def handle_thanks(choose=None) -> str:
     """Handle thank you responses based on context."""
     global _state
     
-    responses = [
-        "You're welcome, sir.",
-        "Happy to help, sir.",
-        "Anytime, sir.",
-        "My pleasure, sir.",
-        "Of course, sir. That's what I'm here for."
-    ]
-    
-    # Add context-aware response
-    if _state.last_topic == "weather":
-        responses.append("You're welcome, sir. Stay warm out there!")
-    elif _state.last_topic == "timer":
-        responses.append("You're welcome, sir. I'll keep track of time for you.")
-    
+    from core.phrases import PHRASES
     import random
     clear_context()
-    return (choose or random.choice)(responses)
+    return (choose or random.choice)(PHRASES['thanks'])

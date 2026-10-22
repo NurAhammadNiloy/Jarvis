@@ -69,10 +69,11 @@ class SmartAlertDispatcher:
         
         if not is_busy:
             # Jarvis is free - do normal voice announcement
+            from core.phrases import say
             if label and label != "Timer":
-                announcement = f"{label} timer: {message}."
+                announcement = say('timer_milestone', name=label.lower(), message=message)
             else:
-                announcement = f"Timer: {message}."
+                announcement = say('timer_milestone_plain', message=message)
             synthesize_speech(announcement)
             result.voice_spoken = True
             return result

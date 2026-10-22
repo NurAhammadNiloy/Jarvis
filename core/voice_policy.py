@@ -5,6 +5,7 @@ import re
 from typing import Optional, Tuple
 
 from core.intent_classifier import classify_intent
+from core.phrases import say
 
 
 @dataclass(frozen=True)
@@ -182,8 +183,7 @@ class ConfidenceGate:
         text = result.text.strip() if text is None else text.strip()
         if result.error or result.truncated:
             self._repeat = None
-            prompt = ("That recording was incomplete. Please say the command again."
-                      if result.truncated else "I couldn't hear that clearly. Please try again.")
+            prompt = say('incomplete') if result.truncated else say('not_heard')
             return VoiceDecision('clarify', prompt=prompt,
                                  reason='incomplete_recording' if result.truncated else result.error)
         if not text:
@@ -197,30 +197,27 @@ class ConfidenceGate:
         conflict = conflict_reason(result, important)
         if conflict:
             self._repeat = None
-            return VoiceDecision('clarify', text=text, reason=conflict,
-                                 prompt="I heard different possibilities. Please repeat the full request.")
+            return VoiceDecision('clarify', text=text, reason=conflict, prompt=say('repeat_please'))
         if result.confidence is not None and result.confidence < (0.8 if important else 0.65):
             self._repeat = None
-            return VoiceDecision('clarify', reason='low_confidence',
-                                 prompt="I'm not sure I heard that correctly. Please repeat it.")
+            return VoiceDecision('clarify', reason='low_confidence', prompt=say('repeat_please'))
         # Do not let the legacy keyword router turn a negated action into an action.
         if intent in ACTION_INTENTS and set(tokens) & NEGATION:
             self._repeat = None
-            return VoiceDecision('clarify', prompt="I won't act on that. Please tell me explicitly what you want me to do.")
+            return VoiceDecision('clarify', prompt=say('wont_act'))
         # These words have multiple possible targets; do not assume a timer.
         if tokens in {('pause',), ('continue',), ('resume',), ('cancel',), ('delete',)}:
             self._repeat = None
-            return VoiceDecision('clarify', prompt="Please include what you want me to control.")
+            return VoiceDecision('clarify', prompt=say('control_what', verb=tokens[0]))
         if intent == 'timer' and not any(t in tokens for t in ('timer', 'timers', 'pomodoro', 'minute', 'minutes', 'second', 'seconds', 'hour', 'hours', 'left', 'remaining')):
             self._repeat = None
-            return VoiceDecision('clarify', prompt="Do you mean a timer? Please include the target in your request.")
+            return VoiceDecision('clarify', prompt=say('mean_timer'))
         if important and result.confidence is None:
             current = (tokens, self.clock())
             previous = self._repeat
             self._repeat = current
             if not previous or previous[0] != tokens or current[1] - previous[1] > self.repeat_window:
-                prompt = (f"I heard: {text}. Please repeat the full request to confirm."
-                          if len(text) <= 120 else "Please repeat the full request to confirm what I heard.")
+                prompt = say('repeat_to_confirm', text=text if len(text) <= 120 else 'That')
                 return VoiceDecision('clarify', prompt=prompt)
         self._repeat = None
         return VoiceDecision('accept', text=text)

@@ -150,7 +150,7 @@ def test_short_stop_interrupts_from_a_partial_recognition_too():
 
 def test_alarm_without_a_real_label_has_none(jarvis):
     jarvis.hear(ALARM_FROM)
-    assert jarvis.said() == ['Alarm set for today at 11:26 AM.']
+    assert jarvis.said() == ['Alarm set for 11:26 AM.']
     assert jarvis.stored() == [('alarm', None, NOW + timedelta(minutes=2))]
 
 
@@ -164,14 +164,14 @@ def test_slot_answer_that_parses_is_accepted_at_0_5(jarvis):
     jarvis.hear(SET_ALARM)
     assert jarvis.said() == ['What time should I set the alarm for?']
     jarvis.hear(IN_TWO_MINUTES)
-    assert jarvis.said()[-1] == 'Alarm set for today at 11:26 AM.'
+    assert jarvis.said()[-1] == 'Alarm set for 11:26 AM.'
     assert jarvis.stored() == [('alarm', None, NOW + timedelta(minutes=2))]
 
 
 def test_slot_answer_with_a_different_likely_time_is_asked_again(jarvis):
     jarvis.hear(SET_ALARM)
     jarvis.hear(heard('in 2 minutes', 0.71, ('in 3 minutes', 0.6)))
-    assert jarvis.said()[-1] == "I'm not sure I heard that. What time should I set the alarm for?"
+    assert jarvis.said()[-1] == "Sorry? What time should I set the alarm for?"
     assert jarvis.stored() == []
 
 
@@ -264,7 +264,7 @@ def test_passive_mode_is_announced(capsys):
 def test_weak_speech_is_still_heard_while_an_answer_is_pending(jarvis):
     jarvis.hear(SET_ALARM)
     jarvis.hear(heard('in 2 minutes', 0.45))  # pending: not ignored, but too weak to set the alarm
-    assert jarvis.said()[-1] == "I'm not sure I heard that. What time should I set the alarm for?"
+    assert jarvis.said()[-1] == "Sorry? What time should I set the alarm for?"
 
 
 def test_transcript_line_shows_the_window(jarvis):
@@ -324,7 +324,7 @@ def test_yes_to_are_you_asking_about_reminders_lists_them_without_a_second_confi
     jarvis.hear(NO_THEY_HAVE)
     assert jarvis.said()[-1].endswith('Are you asking if there are any reminders set?')
     jarvis.hear(YES_REMINDERS)
-    assert jarvis.said()[-1] == 'You have no reminders.'
+    assert jarvis.said()[-1] == 'No reminders.'
     assert 'Shall I' not in ' '.join(jarvis.said())
     assert jarvis.resolver.call_args.args[0]['history'][-1]['text'] == 'yes'
 
@@ -332,7 +332,7 @@ def test_yes_to_are_you_asking_about_reminders_lists_them_without_a_second_confi
 def test_changing_proposals_run_and_report_the_result(jarvis):
     jarvis.resolver.return_value = {'reply': 'Ok.', 'query': 'delete my dentist reminder'}
     jarvis.hear(heard('Jarvis get rid of the dentist thing', 0.9))
-    assert jarvis.said()[-1] == "I couldn't find a reminder about dentist."
+    assert jarvis.said()[-1] == "I can't find a reminder about dentist."
 
 
 # --- "for <number> <unit>" in reminders (session 5472c258, 12:21) ---------------------
@@ -363,7 +363,7 @@ def test_reminder_without_a_task_asks_what_to_remind_about(jarvis):
     assert jarvis.said() == ['What should I remind you about?']
     assert jarvis.stored() == []
     jarvis.hear(heard('Jarvis stretch', 0.9))   # addressed, as people do
-    assert jarvis.said()[-1] == 'Reminder set for today at 11:26 AM: stretch.'
+    assert jarvis.said()[-1] == 'Done, reminding you at 11:26 AM: stretch.'
     assert jarvis.stored() == [('reminder', 'stretch', NOW + timedelta(minutes=2))]
 
 
@@ -387,7 +387,7 @@ def test_session_exchange_no_longer_saves_the_time_as_the_task(jarvis):
 def test_task_answer_that_is_a_command_is_a_new_request(jarvis):
     jarvis.hear(FOR_TWO)
     jarvis.hear(heard('what time is it', 0.95))
-    assert jarvis.said()[-1].startswith('The current time is') and jarvis.stored() == []
+    assert jarvis.said()[-1].startswith("It's ") and jarvis.stored() == []
 
 
 # --- 12:55 session (193aa5d4): flow fixes -----------------------------------------------
@@ -408,7 +408,7 @@ def run_window(assistant, listener, now, until):
     return ticks[-1]
 
 
-@pytest.mark.parametrize('reply, closes_after', [(EARTH_QUESTION, 20), ('Reminder set for today at 12:58 PM: stretch.', 10)])
+@pytest.mark.parametrize('reply, closes_after', [(EARTH_QUESTION, 20), ('Done, reminding you at 12:58 PM: stretch.', 10)])
 def test_window_is_20_seconds_after_a_question_and_10_after_a_statement(reply, closes_after):
     from config import settings
     assert settings.QUESTION_WINDOW_SECONDS == 20
@@ -457,7 +457,7 @@ def test_clear_speech_over_a_question_is_flagged_not_dropped():
 
 @pytest.mark.parametrize('recognition, playback_text', [
     (replace(OVER_QUESTION, confidence=0.79), QUESTION_TEXT),                      # not clear enough
-    (OVER_QUESTION, 'Reminder set for today at 12:58 PM: stretch.'),               # no question asked
+    (OVER_QUESTION, 'Done, reminding you at 12:58 PM: stretch.'),               # no question asked
     (replace(OVER_QUESTION, text=QUESTION_TEXT), QUESTION_TEXT),                   # Jarvis's own echo
 ], ids=['below 0.8', 'no question asked', 'echo'])
 def test_other_overlaps_are_still_just_discarded(recognition, playback_text):
