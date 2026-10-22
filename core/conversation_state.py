@@ -30,7 +30,8 @@ _NEGATIONS = {'no', 'nope', 'nah', 'not', "don't", 'never', 'negative'}
 _AFFIRMATIONS = _YES - {'do', 'go'}  # words that say yes on their own
 _CANCEL = {('cancel',), ('never', 'mind'), ('nevermind',), ('forget', 'it'), ('cancel', 'that'),
            ('cancel', 'it')}
-_STOP_WORDS = {'stop', 'stopped', 'stops', 'stopping', 'stahp', 'please'}
+# How recognition spells "stop": stopped, stoppe, stopp, stahp, stops, stopping.
+_STOP_WORD = re.compile(r"st(?:o+p+(?:e|ed|s|ing)?|a+h*p+)")
 _WAKE_VARIANTS = {'jarvis', 'yarvis', 'jervis', 'javis'}
 
 
@@ -103,7 +104,8 @@ def means_stop(text):
     """'stop', 'Jarvis stop', and how recognition spells it ('stopped', 'stahp')."""
     tokens = _stop_words(text)
     return tuple(tokens) in STOP_PHRASES or (
-        any(t != 'please' for t in tokens) and all(t in _STOP_WORDS for t in tokens))
+        any(_STOP_WORD.fullmatch(t) for t in tokens) and
+        all(t == 'please' or _STOP_WORD.fullmatch(t) for t in tokens))
 
 
 def means_cancel(text):

@@ -32,13 +32,15 @@ AFTER_TWO_MINUTES_ON = heard('after 2 minutes from now on', 0.86714858)         
 STRETCH = heard('remind me to stretch in 2 minutes', 0.94240671,                          # 50
                 ('remind me to strech in 2 minutes', 0.94240671))
 SHALL_I_YES = heard('shall I do that yes', 0.66736883, ('yes', 0.73953891),                # 69
-                    ('shall I do that yesss', 0.66736883), ('should I do that yes', 0.56713855))
+                    ('shall I do that yesss', 0.66736883), ('should I do that yes', 0.56713855),
+                    ('yesss', 0.73953891))
 YES_DO_IT = heard('yes do it', 0.86605543, ('shall I do that yes do it', 0.72870833),       # 89
-                  ('yesss do it', 0.86605543), ('yess do it', 0.86605543))
+                  ('yesss do it', 0.86605543), ('yess do it', 0.86605543),
+                  ('should I do that yes do it', 0.73652571))
 YES = heard('yes', 0.61275631, ('yesss', 0.61275631), ('yessss', 0.61275631),             # 362
-            ('yess', 0.61275631))
+            ('yess', 0.61275631), ('yesssss', 0.61275631))
 JARVIS_STOP = heard('Jarvis stop', 0.72958487, ('Jarvis stopped', 0.72958487),             # 423
-                    ('Jarvis stahp', 0.72958487), ('Yarvis stop', 0.72958487))
+                    ('Jarvis stahp', 0.72958487), ('Yarvis stop', 0.72958487), ('Jarvis stoppe', 0.72958487))
 STOP = heard('stop', 0.91)
 NOISE = Recognition(error='unrecognized')                                                 # 138, 177, 442
 DEFINITION = heard('definition', 0.084044158, ('vision', 0.12234839), ('defination', 0.084044158))
@@ -268,7 +270,11 @@ from core.voice_capture import AudioUtterance, Endpointer, VoiceConfig
 from core.voice_runtime import ContinuousListener
 
 SHALL_I = 'I have: set an alarm for 2 minutes from now. Shall I do that?'
-ECHO = heard('set an alarm for 2 minutes from now shall I do that', 0.65626115)          # 358
+ECHO = heard('set an alarm for 2 minutes from now shall I do that', 0.65626115,         # 358
+             ('set an alarm for 2 minutes from now until I do that', 0.64427298),
+             ('set an alarm for 2 minutes from now till I do that', 0.65704453),
+             ('set an alarm for 2 minutes from now should I do that', 0.69248945),
+             ('set an alarm for 2 minutes from now shalt I do that', 0.65626115))
 
 
 def speakers_listener(*results, echo_mode='speakers'):
