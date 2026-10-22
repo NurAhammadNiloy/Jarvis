@@ -131,9 +131,16 @@ def test_add_or_new_timer_is_one_either_or_question(jarvis, answer, added):
     assert (len(jarvis.timers()) == 2) is not added
 
 
-def test_more_minutes_on_an_existing_timer_asks_add_or_new(jarvis):
-    jarvis.hear(heard('Jarvis set a coffee timer for 5 minutes', 0.92))
+def test_more_minutes_on_an_existing_timer_adds_to_it(jarvis):
+    jarvis.hear(heard('Jarvis set a timer for 5 minutes to drink coffee', 0.91569328))
     jarvis.hear(MORE_COFFEE)
+    assert questions(jarvis) == []
+    assert jarvis.timers()['Drink Coffee'].duration_seconds == 8 * 60
+
+
+def test_a_new_timer_named_like_a_running_one_asks_add_or_new(jarvis):
+    jarvis.hear(heard('Jarvis set a coffee timer for 5 minutes', 0.92))
+    jarvis.hear(heard('Jarvis set a coffee timer for 3 minutes', 0.92))
     assert jarvis.said()[-1] == 'Add 3 minutes to coffee, or a new 3-minute timer?'
 
 

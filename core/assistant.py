@@ -385,6 +385,8 @@ class Assistant:
                 return ('ask', [primary, differing[0]])
             existing = primary.intent == 'start_timer' and self._running_timer_named(
                 primary, [text] + [a.text for a in recognition.alternatives])
+            if existing and set(words(text)) & _MORE:
+                return ('act', _add_time(primary, existing))  # "3 more minutes on coffee": add
             if existing:
                 return ('ask', [_add_time(primary, existing), primary])
             return ('act', primary)
@@ -616,6 +618,8 @@ def _add_time(start, label):
     return Command('add_timer_time', f"add {start.query} to {label} timer", args)
 
 
+# "3 more minutes on the coffee timer" adds to it ("another 5-minute timer" is a new one).
+_MORE = {'more', 'extra', 'additional'}
 _CUE_WORDS = {'add_timer_time': {'add', 'more', 'extend', 'existing', 'it', 'that', 'same'},
               'start_timer': {'new', 'another', 'separate', 'start', 'fresh', 'second'}}
 _COMMON = {'the', 'a', 'an', 'to', 'for', 'or', 'timer', 'of', 'set', 'your'}
