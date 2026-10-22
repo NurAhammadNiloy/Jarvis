@@ -139,6 +139,12 @@ class ContinuousListener:
     def handle_final(self, utterance):
         """Testable final-result policy, independent of capture threads."""
         result = self._transcribe(utterance)
+        if result.playback_id is not None and self.config.echo_mode == 'headset':
+            # The microphone cannot hear Jarvis: speech during its reply is yours, an
+            # answer or an interruption, and is never filtered as echo.
+            if can_interrupt(result, self.stop_confidence, any_speech=True):
+                self.speech.stop(expected_id=result.playback_id)
+            return result
         if result.playback_id is not None:
             echo = is_echo(result.text, result.playback_text)
             addressed = strip_wake_word(result.text) is not None
@@ -206,7 +212,8 @@ class ContinuousListener:
     def handle_interruption(self, utterance):
         """Never puts partial words on the command queue."""
         result = self._transcribe(utterance, partial=True)
-        if not self._stop.is_set() and can_interrupt(result, self.stop_confidence):
+        if not self._stop.is_set() and can_interrupt(result, self.stop_confidence,
+                                                     any_speech=self.config.echo_mode == 'headset'):
             stopped = self.speech.stop(expected_id=utterance.playback_id)
             record('interruption', text=result.text, playback_id=utterance.playback_id,
                    stopped=bool(stopped))

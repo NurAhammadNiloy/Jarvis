@@ -20,7 +20,8 @@ class VoiceConfig:
     # Speech after Jarvis stopped that marks an overlapping utterance as yours.
     after_playback_speech_ms: int = 300
     # settings.ECHO_MODE: 'speakers' discards audio while Jarvis is audible and
-    # for playback_tail_ms after, except speech that starts with "Jarvis" or "stop".
+    # for playback_tail_ms after, except speech that starts with "Jarvis" or "stop";
+    # 'headset' keeps everything, because the microphone cannot hear Jarvis.
     echo_mode: str = 'speakers'
     playback_tail_ms: int = 300
 

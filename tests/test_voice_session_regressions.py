@@ -171,21 +171,29 @@ def listener_returning(recognition, echo_mode='headset'):
 
 @pytest.mark.parametrize('answer', [YES, YES_PLEASE, YES_PLEASE_2,
                                     heard('delete my call Mom reminder', 0.95281059)])
-def test_answer_spoken_after_jarvis_stopped_is_kept(answer):
-    utterance = AudioUtterance(b'pcm', playback_id=5, playback_text=SHALL_I, voiced_after_playback_ms=1700)
+@pytest.mark.parametrize('after_ms', [1700, 0])
+def test_headset_keeps_answers_during_and_after_jarvis(answer, after_ms):
+    # The microphone cannot hear Jarvis, so an answer is kept even when it started (or
+    # stayed entirely) over Jarvis's reply.
+    utterance = AudioUtterance(b'pcm', playback_id=5, playback_text=SHALL_I, voiced_after_playback_ms=after_ms)
     result = listener_returning(answer).handle_final(utterance)
-    assert result is not None and result.text == answer.text and result.playback_id is None
+    assert result is not None and result.text == answer.text and not result.error
 
 
-def test_speech_entirely_over_jarvis_is_still_rejected():
+def test_speech_entirely_over_jarvis_is_not_executed_over_speakers():
     utterance = AudioUtterance(b'pcm', playback_id=10, playback_text='Would you like to set an alarm for 6:30 AM?',
                                voiced_after_playback_ms=0)
-    assert listener_returning(ALARM_OVER_JARVIS).handle_final(utterance) is None
+    result = listener_returning(ALARM_OVER_JARVIS, echo_mode='speakers').handle_final(utterance)
+    assert result is None or result.error == 'said_over_jarvis'
+    kept = listener_returning(ALARM_OVER_JARVIS).handle_final(utterance)           # headset
+    assert kept.text == ALARM_OVER_JARVIS.text and not kept.error
 
 
-def test_unrecognized_audio_after_playback_is_still_dropped():
+def test_unrecognized_audio_over_jarvis():
     utterance = AudioUtterance(b'pcm', playback_id=5, playback_text=SHALL_I, voiced_after_playback_ms=2000)
-    assert listener_returning(Recognition(error='unrecognized')).handle_final(utterance) is None
+    assert listener_returning(Recognition(error='unrecognized'), echo_mode='speakers').handle_final(utterance) is None
+    # Headset: passed on like any unrecognized audio; the assistant decides (it stays quiet).
+    assert listener_returning(Recognition(error='unrecognized')).handle_final(utterance).error == 'unrecognized'
 
 
 def test_endpointer_measures_speech_after_playback_stops():

@@ -142,17 +142,22 @@ def alternatives_conflict(result, important=False):
     return conflict_reason(result, important) is not None
 
 
-def can_interrupt(result, stop_confidence=0.65):
+def can_interrupt(result, stop_confidence=0.65, any_speech=False):
     """Partial recognition may only cancel speech, never authorize an action.
-    A short stop needs `stop_confidence` (0.35 over loudspeakers, see ECHO_MODE)."""
+    A short stop needs `stop_confidence` (0.35 over loudspeakers, see ECHO_MODE).
+    `any_speech` (headset mode, where the microphone cannot hear Jarvis): whatever you
+    clearly say interrupts, except "don't stop"."""
     if result.error or result.truncated or not result.text:
         return False
-    if is_echo(result.text, result.playback_text):
+    if not any_speech and is_echo(result.text, result.playback_text):
         return False
     if stop_heard(result, stop_confidence):
         return True
     if result.confidence is not None and result.confidence < 0.65:
         return False
+    if any_speech:
+        tokens = set(words(result.text))
+        return not (tokens & NEGATION and tokens & {'stop', 'talking', 'speaking', 'going'})
     if alternatives_conflict(result, important=True):
         return False
     if set(words(result.text)) & NEGATION:

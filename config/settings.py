@@ -10,10 +10,11 @@ TIMEZONE = None
 # Print one line per heard utterance (what Jarvis heard, how it was handled, timings).
 SHOW_TRANSCRIPTS = True
 
+# "headset": the microphone does not hear Jarvis (wired headphones with a mic), so you
+# can answer or interrupt at any time, also while Jarvis is speaking.
 # "speakers": the microphone hears Jarvis, so while it speaks and for 0.3 s after,
 # only speech starting with "Jarvis" or "stop" counts; the rest is discarded.
-# "headset": the microphone does not hear Jarvis.
-ECHO_MODE = "speakers"
+ECHO_MODE = "headset"
 
 # After the wake word or a finished exchange (once Jarvis stops speaking), Jarvis
 # listens without the wake word for this long, then returns to passive mode.
