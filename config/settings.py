@@ -16,6 +16,15 @@ SHOW_TRANSCRIPTS = True
 # only speech starting with "Jarvis" or "stop" counts; the rest is discarded.
 ECHO_MODE = "headset"
 
+# On-device wake word: "Hey Jarvis" (usually also plain "Jarvis"), detected on the CPU
+# by openWakeWord. While Jarvis is passive, nothing is sent to cloud speech recognition
+# until it fires. None = the old check for "Jarvis" in the cloud transcript.
+WAKE_WORD_ENGINE = "openwakeword"
+
+# 0-1. Higher: fewer false wake-ups, more missed wake words. Lower: the opposite.
+# 0.5 is openWakeWord's recommended default; measure with tools/measure_wake_word.py.
+WAKE_WORD_THRESHOLD = 0.5
+
 # After the wake word or a finished exchange (once Jarvis stops speaking), Jarvis
 # listens without the wake word for this long, then returns to passive mode.
 ACTIVE_WINDOW_SECONDS = 30

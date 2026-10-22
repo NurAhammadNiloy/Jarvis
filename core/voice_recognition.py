@@ -60,8 +60,27 @@ def get_listener(speech=None, config=None):
                 from core.speech_synthesis import get_speech_controller
                 speech = get_speech_controller()
             _listener = ContinuousListener(MicrophoneFrames(config), create_vad(config),
-                                          GoogleRecognizer(config), speech, config)
+                                          GoogleRecognizer(config), speech, config,
+                                          wake_detector=_wake_detector())
         return _listener
+
+
+def _wake_detector():
+    """The on-device wake-word detector from settings; None (transcript check) if off
+    or if it cannot start (it says why, once)."""
+    from config.settings import WAKE_WORD_ENGINE, WAKE_WORD_THRESHOLD
+    from core.conversation_log import record
+    try:
+        from core.wake_word import create_detector
+        detector = create_detector(WAKE_WORD_ENGINE, WAKE_WORD_THRESHOLD)
+    except Exception as exc:
+        print(f"Wake-word detector unavailable ({type(exc).__name__}: {exc}); checking the transcript instead.")
+        record('wake_word_unavailable', error=type(exc).__name__, detail=str(exc)[:200])
+        return None
+    if detector is not None:
+        print(f"Wake word: on-device ({WAKE_WORD_ENGINE}, threshold {WAKE_WORD_THRESHOLD}).")
+        record('wake_word_ready', engine=WAKE_WORD_ENGINE, threshold=WAKE_WORD_THRESHOLD)
+    return detector
 
 
 def listen_result(timeout=30):

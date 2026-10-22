@@ -2,6 +2,7 @@
 from collections import deque
 from dataclasses import dataclass
 import queue
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,10 @@ class AudioUtterance:
     # Speakers mode: the audio after Jarvis stopped plus the 0.3 s tail, when you
     # kept speaking that long (e.g. "yes" right after "Shall I do that?").
     after_playback_pcm: bytes = b''
+    # The on-device wake word fired in this utterance: its score, and where in `pcm`
+    # the speech after it starts.
+    wake_score: Optional[float] = None
+    wake_offset: int = 0
 
 
 class Endpointer:

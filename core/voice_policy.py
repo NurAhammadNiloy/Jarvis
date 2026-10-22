@@ -24,6 +24,9 @@ class Recognition:
     playback_id: Optional[int] = None
     playback_text: str = ""
     captured_at: Optional[float] = None
+    # The on-device detector heard the wake word at the start of this utterance (its
+    # score). The text is then addressed to Jarvis even if it lacks "Jarvis".
+    wake_score: Optional[float] = None
     # Identifies one heard utterance in the log (kept by dataclasses.replace).
     uid: int = field(default_factory=itertools.count(1).__next__, compare=False)
 
