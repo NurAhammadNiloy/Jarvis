@@ -305,9 +305,18 @@ class Assistant:
         if question:  # ask for the missing time now, not after "yes"
             self.state.await_slot(command.intent, 'time', query, question)
             return question
-        prompt = f"I have: {query.rstrip('.!?')}. Shall I do that?"
+        prompt = self._describe(command) + '?'
         self.state.confirm(command, prompt)
         return prompt
+
+    def _describe(self, command):
+        """What will actually run, from the parsed command (not the transcript)."""
+        from core.command_description import describe_command
+        try:
+            now = self.services.now()
+        except Exception:
+            now = None
+        return describe_command(command, now if hasattr(now, 'tzinfo') else None)
 
     def _dialogue_turn(self, recognition, text, decision, intent):
         started = time.monotonic()

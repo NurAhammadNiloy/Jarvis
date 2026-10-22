@@ -332,7 +332,7 @@ def test_yes_to_are_you_asking_about_reminders_lists_them_without_a_second_confi
 def test_changing_proposals_still_need_confirmation(jarvis):
     jarvis.resolver.return_value = {'reply': 'Ok.', 'query': 'delete my dentist reminder'}
     jarvis.hear(heard('Jarvis get rid of the dentist thing', 0.9))
-    assert jarvis.said()[-1] == 'I have: delete my dentist reminder. Shall I do that?'
+    assert jarvis.said()[-1] == 'Delete the dentist reminder?'
 
 
 # --- "for <number> <unit>" in reminders (session 5472c258, 12:21) ---------------------
@@ -588,3 +588,22 @@ def test_ordinary_answers_are_kept(reply):
 def test_only_the_claiming_sentence_is_removed():
     from core.dialogue import without_action_claims
     assert without_action_claims("Got it, I've saved that. What else?") == 'What else?'
+
+
+# --- read back what will run, not the transcript ------------------------------------------
+
+@pytest.mark.parametrize('query, readback', [
+    ('at 5 minutes to pass the timer', 'Start a new 5-minute timer'),                       # 578, logged
+    ('add 5 minutes to the pasta timer', 'Add 5 minutes to the pasta timer'),
+    ('remind me about stand up every Monday at 9:00 a.m.', 'Set a weekly reminder, Mondays at 9 AM: stand up'),
+    ('set a timer for 25 minutes called pasta', 'Start a new 25-minute pasta timer'),
+    ('pause the pasta timer', 'Pause the pasta timer'),
+    ('remind me to drink water in 2 minutes', 'Set a reminder for today at 11:26 AM: drink water'),
+    ('set an alarm in 3 minutes', 'Set an alarm for today at 11:27 AM'),
+    ('cancel all the timer', 'Cancel all timers'),
+    ('play Hindi lofi music on YouTube', 'Play Hindi lofi music on YouTube'),
+])
+def test_confirmations_describe_the_parsed_command(jarvis, query, readback):
+    from core.command_description import describe_command
+    from core.command_engine import understand_query
+    assert describe_command(understand_query(query, jarvis.assistant.services), NOW) == readback

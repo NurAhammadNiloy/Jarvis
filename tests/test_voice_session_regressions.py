@@ -142,7 +142,7 @@ def test_logged_delete_is_confirmed_once_and_deletes(assistant_with_reminder, co
     assistant.process_recognition(ADDRESSED_DEFINITION)  # the misheard turn that started a repair
     assert resolver.call_count == 1
     assistant.process_recognition(command)
-    output.assert_called_with(f"I have: {command.text[len('Jarvis '):]}. Shall I do that?")
+    output.assert_called_with('Delete the call mom reminder?')
     assert resolver.call_count == 1  # name variants are confirmed without ChatGPT
     assistant.process_recognition(answer)
     output.assert_called_with('Deleted: call mom, today at 9:00 PM.')

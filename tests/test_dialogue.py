@@ -102,17 +102,18 @@ def test_assistant_routes_confirmed_repair_through_existing_boundary():
     assert any(h['text'] == 'Reminder set.' for h in assistant.dialogue.history)
 
 
-@pytest.mark.parametrize('query, method', [('delete my dentist reminder', 'delete_reminder'),
-                                           ('snooze that reminder', 'snooze_reminder'),
-                                           ('set an alarm for 7am', 'reminder')])
-def test_reminder_and_alarm_proposals_need_spoken_confirmation(query, method):
+@pytest.mark.parametrize('query, method, readback', [
+    ('delete my dentist reminder', 'delete_reminder', 'Delete the dentist reminder?'),
+    ('snooze that reminder', 'snooze_reminder', 'Snooze the reminder for 10 minutes?'),
+    ('set an alarm for 7am', 'reminder', 'Set an alarm for tomorrow at 7 AM?')])
+def test_reminder_and_alarm_proposals_need_spoken_confirmation(query, method, readback):
     services = mock_services()
     getattr(services, method).return_value = ActionResult(('Done.',))
     output = Mock()
     assistant = Assistant(Mock(), Mock(), services, output, clock=lambda: 0,
         dialogue=Dialogue(Mock(return_value={'reply': 'Ready', 'query': query}), clock=lambda: 0))
     assistant.process_recognition(Recognition('something', .9))
-    output.assert_called_with(f'I have: {query}. Shall I do that?')
+    output.assert_called_with(readback)
     getattr(services, method).assert_not_called()
     assistant.process_recognition(Recognition('yes', .95))
     getattr(services, method).assert_called_once()

@@ -96,7 +96,7 @@ def test_time_answer_completes_the_alarm_instead_of_starting_a_new_request(jarvi
 def test_confirmed_proposal_executes_its_parsed_values_without_asking_again(jarvis):
     jarvis.resolver.return_value = ALARM_PROPOSAL
     jarvis.hear(AFTER_TWO_MINUTES_ON)  # idle: conversation, so the model proposes
-    assert jarvis.said() == ['I have: set an alarm for 2 minutes from now. Shall I do that?']
+    assert jarvis.said() == ['Set an alarm for today at 10:38 AM?']  # what will run, not the transcript
     jarvis.hear(YES)
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
     assert jarvis.said()[-1] == 'Alarm set for today at 10:38 AM.'

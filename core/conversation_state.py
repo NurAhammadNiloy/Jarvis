@@ -143,6 +143,8 @@ class AwaitingSlot:
 IDLE = Idle()
 # Asked again after an unclear yes/no. It must not contain "yes": the echo
 # filter drops a "yes" heard while Jarvis is saying "yes".
+# The confirmation question used until 22 Oct; its echo still turns up in answers.
+_OLD_PROMPT = 'Shall I do that?'
 REPROMPT = "Sorry, I didn't catch that. Should I go ahead?"
 
 
@@ -197,9 +199,9 @@ class ConversationState:
             return None
         if isinstance(state, AwaitingSlot):
             return Answer('fill', text=f'{state.query} {text}')
-        answer = strip_echoed_prompt(text, state.prompt, REPROMPT)
+        answer = strip_echoed_prompt(text, state.prompt, REPROMPT, _OLD_PROMPT)
         kind = answer_kind(answer)
-        if kind in ('yes', 'no') and not answer_reliable(recognition, kind, state.prompt, REPROMPT):
+        if kind in ('yes', 'no') and not answer_reliable(recognition, kind, state.prompt, REPROMPT, _OLD_PROMPT):
             return Answer('reply', text=REPROMPT)
         if kind == 'yes':
             self.clear('confirmed')
