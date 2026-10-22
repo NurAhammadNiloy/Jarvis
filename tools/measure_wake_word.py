@@ -5,7 +5,9 @@
 
 1. Two minutes of normal room sound (talk, type, play a video; just don't say
    "Hey Jarvis"). You note what was playing; it is printed with the results.
-2. You say "Hey Jarvis" 10 times when prompted.
+2. You say "Hey Jarvis" 10 times, each right after "Now!" (the first after Enter and a
+   countdown). A try in which no speech was heard at all is repeated once, so a late
+   start is not counted as a miss.
 
 The same audio goes to the plain model and, once you have trained it
 (tools/train_wake_verifier.py), to the model tuned to your voice, so the two can be
@@ -146,6 +148,44 @@ def peak_lines(log):
     return lines
 
 
+def voiced_ms(audio, vad):
+    return sum(1 for i in range(0, len(audio) - FRAME_BYTES + 1, FRAME_BYTES)
+               if vad(audio[i:i + FRAME_BYTES])) * FRAME_BYTES * 1000 // (SAMPLE_RATE * 2)
+
+
+def run_tries(frames, detectors, names, count, vad, log, countdown=3, wait=input, listen=listen):
+    """`count` tries of "Hey Jarvis", each started by a clear "Now!": per detector, a list of
+    (detected, score). A try with no speech at all (under 0.2 s) and no detection was a late
+    start, not a miss: it is repeated, once."""
+    wait('Press Enter when you are ready; the first try starts after a countdown. ')
+    print(' ', end='')
+    for number in range(countdown, 0, -1):
+        print(f' {number}...', end='', flush=True)
+        listen(frames, detectors, 1)
+    print()
+    tries = [[] for _ in detectors]
+    number, repeating = 1, False
+    while number <= count:
+        if number > 1 or repeating:
+            listen(frames, detectors, 1.5)  # a pause, and the end of the previous try
+        print(f'  ({number}/{count}) Now! Say "Hey Jarvis"...', end=' ', flush=True)
+        heard = AudioLog()
+        results = listen(frames, detectors, 4, log=heard)
+        log.audio += heard.audio
+        log.lost += heard.lost
+        if not repeating and voiced_ms(heard.audio, vad) < 200 and not any(found for found, _ in results):
+            print("I didn't hear you; this one again.")
+            repeating = True
+            continue
+        repeating = False
+        for index, (found, peak) in enumerate(results):
+            tries[index].append((bool(found), found[0][1] if found else peak))
+        print(', '.join(f"{n.lower()}: " + (f"detected {t[-1][1]:.2f}" if t[-1][0] else f"missed ({t[-1][1]:.2f})")
+                        for n, t in zip(names, tries)))
+        number += 1
+    return tries
+
+
 def microphone_lines(background, tries):
     """The microphone check: levels of the background and of your tries, and lost frames."""
     from core.wake_word import level_warnings
@@ -211,7 +251,7 @@ def main():
     parser.add_argument('--device', default=None, help='input device name or index (default: the system microphone)')
     args = parser.parse_args()
 
-    from core.voice_capture import MicrophoneFrames, VoiceConfig
+    from core.voice_capture import MicrophoneFrames, VoiceConfig, create_vad
     names, detectors = ['Plain model'], [OpenWakeWordDetector(args.threshold)]
     if VERIFIER_PATH.exists():
         names.append('Tuned to your voice')
@@ -240,16 +280,8 @@ def main():
         background_log.finish()
         print('\n')
 
-        print("Step 2: say \"Hey Jarvis\" when prompted, at your normal distance and volume.")
-        tries = [[] for _ in detectors]
-        for number in range(1, args.tries + 1):
-            listen(frames, detectors, 1.5)  # a pause, and the end of the previous try
-            print(f"  ({number}/{args.tries}) Say \"Hey Jarvis\" now...", end=' ', flush=True)
-            results = listen(frames, detectors, 4, log=tries_log)
-            for index, (found, peak) in enumerate(results):
-                tries[index].append((bool(found), found[0][1] if found else peak))
-            print(', '.join(f"{n.lower()}: " + (f"detected {t[-1][1]:.2f}" if t[-1][0] else f"missed ({t[-1][1]:.2f})")
-                            for n, t in zip(names, tries)))
+        print("Step 2: say \"Hey Jarvis\" right after each \"Now!\", at your normal distance and volume.")
+        tries = run_tries(frames, detectors, names, args.tries, create_vad(VoiceConfig()), tries_log)
 
     print(f"\nResults (threshold {args.threshold:.2f}; background: {playing or 'not noted'})")
     for name, back, tried in zip(names, background, tries):

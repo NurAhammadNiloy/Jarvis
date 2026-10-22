@@ -170,3 +170,44 @@ def test_the_microphone_check_reports_noise_clipping_and_lost_frames():
     loud.lost = 2
     lines = measure.microphone_lines(quiet, loud)
     assert any('320 samples clipped' in line for line in lines) and 'lost frames' in lines[-1]
+
+
+# --- the tries start on a clear cue --------------------------------------------------------------
+
+SPOKEN, QUIET = b'\x01\x00' * 320, b'\x00' * 640
+
+
+def scripted_listen(*tries):
+    """A stand-in for listen(): each try window hears (audio, per-detector results) in turn."""
+    tries, calls = list(tries), []
+
+    def fake(frames, detectors, seconds, clock=None, log=None):
+        calls.append(seconds)
+        if log is None:
+            return [([], 0.0) for _ in detectors]
+        audio, results = tries.pop(0)
+        log.audio += audio
+        return results
+    return fake, calls
+
+
+def test_tries_start_after_enter_a_countdown_and_now(capsys):
+    fake, calls = scripted_listen((SPOKEN * 30, [([(1.0, 0.8)], 0.8)]))
+    waited = []
+    tries = measure.run_tries(None, [None], ['Tuned'], 1, lambda f: f == SPOKEN, measure.AudioLog(),
+                              wait=waited.append, listen=fake)
+    assert tries == [[(True, 0.8)]] and waited and calls == [1, 1, 1, 4]   # 3, 2, 1, then the try at once
+    out = capsys.readouterr().out
+    assert '  3... 2... 1...\n' in out and '(1/1) Now! Say "Hey Jarvis"... tuned: detected 0.80' in out
+
+
+def test_a_try_without_any_speech_is_repeated_once_not_counted(capsys):
+    late = (QUIET * 200, [([], 0.0), ([], 0.0)])
+    spoken = (SPOKEN * 30, [([], 0.31), ([(1.0, 0.72)], 0.72)])
+    log = measure.AudioLog()
+    fake, _ = scripted_listen(late, spoken, late, late)
+    tries = measure.run_tries(None, [None, None], ['Plain', 'Tuned'], 2, lambda f: f == SPOKEN, log,
+                              wait=lambda *_: '', listen=fake)
+    assert tries == [[(False, 0.31), (False, 0.0)], [(True, 0.72), (False, 0.0)]]   # silent twice: a miss
+    assert capsys.readouterr().out.count("I didn't hear you") == 2
+    assert len(log.audio) == len(QUIET * 200) * 3 + len(SPOKEN * 30)        # every try's audio is checked for levels
