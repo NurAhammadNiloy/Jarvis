@@ -158,10 +158,11 @@ def test_clear_command_during_a_repair_takes_the_fast_path(assistant_with_remind
 
 # --- answers that overlapped Jarvis's own voice --------------------------------------
 
-def listener_returning(recognition):
+def listener_returning(recognition, echo_mode='headset'):
     speech = Mock()
     speech.snapshot.return_value = SpeechSnapshot()
-    return ContinuousListener(Mock(), lambda frame: False, lambda pcm, partial=False: recognition, speech)
+    return ContinuousListener(Mock(), lambda frame: False, lambda pcm, partial=False: recognition, speech,
+                              VoiceConfig(echo_mode=echo_mode))
 
 
 @pytest.mark.parametrize('answer', [YES, YES_PLEASE, YES_PLEASE_2,

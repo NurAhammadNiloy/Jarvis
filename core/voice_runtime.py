@@ -140,10 +140,16 @@ class ContinuousListener:
         """Testable final-result policy, independent of capture threads."""
         result = self._transcribe(utterance)
         if result.playback_id is not None:
-            if is_echo(result.text, result.playback_text):
+            echo = is_echo(result.text, result.playback_text)
+            addressed = strip_wake_word(result.text) is not None
+            if self.config.echo_mode == 'speakers' and (echo or not (addressed or is_stop(result.text))):
+                # Began while Jarvis was audible (or within 0.3 s after): only
+                # "Jarvis ..." or "stop" count. Keep what you said afterwards.
+                record('voice_filter', reason='speakers_mode', text=result.text)
+                return self._after_playback(utterance)
+            if echo:
                 record('voice_filter', reason='response_echo', text=result.text)
                 return None
-            addressed = strip_wake_word(result.text) is not None
             if not addressed and not is_stop(result.text):
                 if result.text and utterance.voiced_after_playback_ms >= self.config.after_playback_speech_ms:
                     # Jarvis's echo opened the utterance, but you kept speaking
@@ -156,6 +162,17 @@ class ContinuousListener:
                 return None
             if can_interrupt(result):
                 self.speech.stop(expected_id=result.playback_id)
+        return result
+
+    def _after_playback(self, utterance):
+        """Speakers mode: recognize only the audio after Jarvis stopped (plus the
+        tail), free of its echo; None if you did not keep speaking."""
+        if not utterance.after_playback_pcm:
+            return None
+        result = self._transcribe(AudioUtterance(utterance.after_playback_pcm))
+        if result.error or not result.text:
+            return None
+        record('voice_filter_passed', reason='spoke_after_playback', text=result.text)
         return result
 
     def _recognize_final(self):

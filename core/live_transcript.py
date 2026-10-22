@@ -78,6 +78,8 @@ class LiveTranscript:
             self._stt_ms = None
         elif self._turn is None:
             return
+        elif event == 'voice_filter' and f.get('reason') == 'speakers_mode':
+            self._finish('ignored: Jarvis speaking (speakers mode)')
         elif event == 'voice_filter':
             self._finish(f"rejected: {_REASONS.get(f.get('reason'), f.get('reason'))}")
         elif event == 'voice_decision':

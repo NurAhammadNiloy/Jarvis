@@ -47,10 +47,13 @@ _listener = None
 _lock = threading.Lock()
 
 
-def get_listener(speech=None, config=VoiceConfig()):
+def get_listener(speech=None, config=None):
     global _listener
     with _lock:
         if _listener is None:
+            if config is None:
+                from config.settings import ECHO_MODE
+                config = VoiceConfig(echo_mode=ECHO_MODE)
             from core.voice_capture import MicrophoneFrames, create_vad
             from core.voice_runtime import ContinuousListener
             if speech is None:

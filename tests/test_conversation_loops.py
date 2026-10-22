@@ -259,3 +259,96 @@ def test_each_reply_is_printed_exactly_once(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert out.count('What time should I set the alarm for?') == 1
     assert out.count('Sir, this is your reminder: stretch.') == 1
+
+
+# --- speakers mode ------------------------------------------------------------------
+
+from core.speech_output import SpeechSnapshot
+from core.voice_capture import AudioUtterance, Endpointer, VoiceConfig
+from core.voice_runtime import ContinuousListener
+
+SHALL_I = 'I have: set an alarm for 2 minutes from now. Shall I do that?'
+ECHO = heard('set an alarm for 2 minutes from now shall I do that', 0.65626115)          # 358
+
+
+def speakers_listener(*results, echo_mode='speakers'):
+    speech = Mock()
+    speech.snapshot.return_value = SpeechSnapshot()
+    recognize = Mock(side_effect=list(results))
+    listener = ContinuousListener(Mock(), lambda frame: False, recognize, speech, VoiceConfig(echo_mode=echo_mode))
+    return listener, recognize, speech
+
+
+def test_echo_mode_setting_defaults_to_speakers():
+    from config import settings
+    assert settings.ECHO_MODE == 'speakers' and VoiceConfig().echo_mode == 'speakers'
+    with pytest.raises(ValueError):
+        VoiceConfig(echo_mode='loud')
+
+
+def run_endpointer(config, *spans):
+    """spans: (frames, voiced, playback_id) runs of 20 ms frames, then silence."""
+    endpoint = Endpointer(config)
+    frame = b'\0' * config.frame_bytes
+    result = None
+    for count, voiced, playback in spans + ((80, False, None),):
+        for _ in range(count):
+            result = endpoint.push(frame, voiced, playback, SHALL_I if playback else '') or result
+    return result
+
+
+def test_speakers_mode_keeps_only_the_speech_after_jarvis_and_its_tail():
+    config = VoiceConfig()
+    # 1 s of Jarvis (its echo opens the detector), then 0.6 s of you right after.
+    result = run_endpointer(config, (50, True, 16), (30, True, None))
+    assert result.playback_id == 16
+    # 0.6 s of you minus the 0.3 s tail, plus the 1.4 s of silence that ended it
+    assert len(result.after_playback_pcm) == (30 - 15 + 70) * config.frame_bytes
+    result = run_endpointer(config, (50, True, 16))  # only Jarvis
+    assert result.after_playback_pcm == b''
+
+
+def test_speakers_mode_treats_the_tail_after_jarvis_as_playback():
+    # Speech starting 0.26 s after Jarvis stopped: still inside the 0.3 s, but past
+    # the 0.3 s pre-roll that would tag it in either mode.
+    starts_in_tail = ((40, False, 16), (13, False, None), (20, True, None))
+    assert run_endpointer(VoiceConfig(), *starts_in_tail).playback_id == 16
+    assert run_endpointer(VoiceConfig(echo_mode='headset'), *starts_in_tail).playback_id is None
+
+
+def test_speakers_mode_discards_echo_and_hears_what_followed(capsys):
+    listener, recognize, _ = speakers_listener(ECHO, YES)
+    utterance = AudioUtterance(b'all', playback_id=16, playback_text=SHALL_I, after_playback_pcm=b'after')
+    result = listener.handle_final(utterance)
+    assert result.text == 'yes' and result.playback_id is None
+    assert recognize.call_args_list[1].args[0] == b'after'
+
+
+@pytest.mark.parametrize('overheard', [ECHO, SHALL_I_YES, heard('what time is it', 0.95)])
+def test_speakers_mode_discards_everything_said_over_jarvis(overheard):
+    listener, recognize, speech = speakers_listener(overheard)
+    utterance = AudioUtterance(b'all', playback_id=16, playback_text=SHALL_I)
+    assert listener.handle_final(utterance) is None
+    speech.stop.assert_not_called()
+
+
+@pytest.mark.parametrize('command', [heard('Jarvis stop', 0.9), heard('stop', 0.9), heard('Jarvis what time is it', 0.9)])
+def test_speakers_mode_still_lets_jarvis_and_stop_interrupt(command):
+    listener, _, speech = speakers_listener(command)
+    result = listener.handle_final(AudioUtterance(b'all', playback_id=16, playback_text=SHALL_I))
+    assert result.text == command.text
+    speech.stop.assert_called_once_with(expected_id=16)
+
+
+def test_discarded_speech_is_marked_in_the_terminal():
+    lines = []
+    printer = LiveTranscript(out=lines.append)
+    conversation_log.add_listener(printer)
+    try:
+        listener, _, _ = speakers_listener(ECHO)
+        listener.handle_final(AudioUtterance(b'all', playback_id=16, playback_text=SHALL_I))
+    finally:
+        conversation_log.remove_listener(printer)
+    assert len(lines) == 1
+    assert lines[0].startswith('You (ignored: Jarvis speaking (speakers mode)): '
+                               '"set an alarm for 2 minutes from now shall I do that"  conf 0.66')
