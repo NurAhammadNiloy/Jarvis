@@ -222,12 +222,18 @@ def test_idle_timeout_runs_but_not_while_user_is_still_talking():
 
 
 def test_pending_time_answer_is_confidence_checked_before_execution():
+    from dataclasses import asdict
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from core.reminder_parser import parse_reminder
     assistant, services, output, _, _ = assistant_fixture()
-    assistant.pending_reminder = {'task': 'call mom'}
+    now = datetime(2026, 10, 22, 12, 0, tzinfo=ZoneInfo('Europe/Helsinki'))
+    services.extract_reminder_info.side_effect = lambda query: asdict(parse_reminder(query, now))
+    assistant.state.await_slot('create_reminder', 'time', 'remind me to call mom', 'When should I remind you?')
     assistant.process_recognition(Recognition('5pm', 0.2))
-    services.extract_reminder_info.assert_not_called()
     services.reminder.assert_not_called()
-    output.assert_called_once()
+    output.assert_called_once_with("I'm not sure I heard that. When should I remind you?")
+    assert assistant.state.pending
 
 
 @pytest.mark.parametrize('passive', [False, True])

@@ -83,9 +83,13 @@ class LiveTranscript:
                 self._turn.path = 'wake word'
             elif decision == 'accept' and not self._turn.path:
                 self._turn.path = 'fast path'
+        elif event == 'pending_answer':
+            self._turn.path = {'execute': 'confirmed', 'cancel': 'cancelled',
+                               'fill': f"answer ({f.get('state')})"}.get(f.get('answer'),
+                                                                        f"reply to ({f.get('state')})")
         elif event == 'dialogue_turn':
             self._turn.model_ms = f.get('duration_ms')
-            if f.get('confirmed_query'):
+            if f.get('confirmed_query'):  # logs from before the conversation state
                 self._turn.path = 'confirmed -> fast path'
             else:
                 self._turn.path = 'ChatGPT dialogue' if f.get('model_called', True) else 'dialogue (no model)'

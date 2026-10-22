@@ -149,7 +149,6 @@ def test_yes_confirms_a_pending_proposal_in_any_state(jarvis, setup, answer):
     assert jarvis.resolver.call_count == calls
 
 
-@baseline
 def test_reprompt_for_an_unclear_answer_does_not_contain_yes(jarvis):
     # "Please say yes again..." made the echo filter drop the next real "yes" (seq 110).
     propose_fresh(jarvis)
@@ -167,7 +166,6 @@ def pending_time(jarvis):
     jarvis.hear(SET_ALARM)
 
 
-@baseline
 @pytest.mark.parametrize('setup', [pending_confirmation, pending_time])
 @pytest.mark.parametrize('stop', [JARVIS_STOP, STOP], ids=['Jarvis stop', 'stop'])
 def test_stop_cancels_whatever_is_pending_without_the_model(jarvis, setup, stop):
@@ -182,12 +180,38 @@ def test_stop_cancels_whatever_is_pending_without_the_model(jarvis, setup, stop)
     assert jarvis.pending() == []
 
 
-@baseline
 def test_jarvis_stop_with_nothing_pending_only_stops_speech(jarvis):
     jarvis.hear(JARVIS_STOP)
     jarvis.resolver.assert_not_called()
     jarvis.output.assert_not_called()
     jarvis.speech.stop.assert_called()
+
+
+# --- the conversation state ------------------------------------------------------
+
+def test_slot_answer_can_ask_the_next_question(jarvis):
+    jarvis.hear(heard('set an alarm at 6', 0.95))
+    assert jarvis.said() == ['Did you mean 6 a.m. or p.m.?']
+    assert jarvis.assistant.state.current.describe() == 'awaiting time for alarm'
+    jarvis.hear(heard('p.m.', 0.9))
+    assert jarvis.pending() == [('alarm', NOW.replace(hour=18, minute=0, second=0))]
+    assert not jarvis.assistant.state.pending
+
+
+def test_slot_answer_that_is_a_request_of_its_own_runs_as_a_new_request(jarvis):
+    jarvis.hear(SET_ALARM)
+    jarvis.hear(heard('what time is it', 0.95))
+    assert jarvis.said()[-1].startswith('The current time is')
+    assert not jarvis.assistant.state.pending
+    assert jarvis.pending() == []
+
+
+def test_proposal_without_a_time_asks_for_it_instead_of_shall_i(jarvis):
+    jarvis.resolver.return_value = {'reply': 'Sure.', 'query': 'set an alarm'}
+    jarvis.hear(heard('I need to get up early', 0.95))
+    assert jarvis.said() == ['What time should I set the alarm for?']
+    jarvis.hear(heard('at 7 am', 0.95))
+    assert jarvis.pending() == [('alarm', (NOW + timedelta(days=1)).replace(hour=7, minute=0, second=0))]
 
 
 # --- unrecognized audio ---------------------------------------------------------------

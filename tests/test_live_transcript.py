@@ -100,3 +100,21 @@ def test_setting_turns_transcripts_off(monkeypatch):
         assert live_transcript.enable(out=lambda line: None) is not None
     finally:
         conversation_log._listeners.clear()
+
+
+def test_answers_to_a_pending_state_show_what_they_answered():
+    lines = feed([
+        recognition('2 minutes from now', 0.94),
+        ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'fill'}),
+        ('command_result', {'intent': 'alarm', 'status': 'handled'}),
+        ('speech_queued', {'playback_id': 2, 'text': 'Alarm set for today at 10:38 AM.'}),
+        ('playback_chunk_started', {'playback_id': 2}),
+        recognition('Jarvis stop', 0.73),
+        ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'cancel'}),
+        ('speech_queued', {'playback_id': 3, 'text': 'Cancelled.'}),
+        ('playback_chunk_started', {'playback_id': 3}),
+    ])
+    assert lines[0].startswith('You (heard): "2 minutes from now"  conf 0.94 | intent alarm'
+                               ' | answer (awaiting time for alarm)')
+    assert lines[0].endswith('Jarvis: "Alarm set for today at 10:38 AM."')
+    assert ' | cancelled | ' in lines[1] and lines[1].endswith('Jarvis: "Cancelled."')

@@ -11,7 +11,9 @@ import pytest
 
 from core.assistant import Assistant
 from core.command_services import CommandServices
-from core.dialogue import Dialogue, answer_kind, answer_reliable
+from core.command_result import Command
+from core.conversation_state import ConversationState, answer_kind, answer_reliable
+from core.dialogue import Dialogue
 from core.intent_classifier import route
 from core.speech_output import PCMClip, SpeechController, SpeechSnapshot
 from core.voice_capture import AudioUtterance, Endpointer, VoiceConfig
@@ -47,14 +49,21 @@ SHALL_I = "I have: delete reminder 'call Mom'. Shall I do that?"
 
 # --- answers to "Shall I do that?" ----------------------------------------------
 
+DELETE_MOM = Command('delete_reminder', 'delete my call Mom reminder', {'target': 'call mom'})
+
+
+def awaiting_delete():
+    state = ConversationState(clock=lambda: 0)
+    state.confirm(DELETE_MOM, SHALL_I)
+    return state
+
+
 @pytest.mark.parametrize('answer', [YES, YES_DO_IT, YES_PLEASE, YES_PLEASE_2])
 def test_every_logged_yes_confirms(answer):
     assert answer_kind(answer.text) == 'yes'
     assert answer_reliable(answer, 'yes')
-    dialogue = Dialogue(Mock(), clock=lambda: 0)
-    dialogue.pending = 'delete my call Mom reminder'
-    assert dialogue.turn(answer).query == 'delete my call Mom reminder'
-    dialogue.resolve.assert_not_called()
+    decided = awaiting_delete().check(answer, answer.text)
+    assert decided.kind == 'execute' and decided.command == DELETE_MOM
 
 
 @pytest.mark.parametrize('text, kind', [
@@ -72,10 +81,9 @@ def test_answer_kinds(text, kind):
     Recognition('yes', 0.3), Recognition('yes'), heard('yes', 0.95, ('no', 0.9)), heard('yes', 0.6, ('yes no', 0.6)),
 ])
 def test_weak_or_contradicted_yes_still_does_not_confirm(recognition):
-    dialogue = Dialogue(Mock(), clock=lambda: 0)
-    dialogue.pending = 'delete my call Mom reminder'
-    assert not dialogue.turn(recognition).query
-    assert dialogue.pending == 'delete my call Mom reminder'
+    state = awaiting_delete()
+    assert state.check(recognition, recognition.text).kind == 'reply'
+    assert state.current.command == DELETE_MOM
 
 
 def test_yes_to_a_model_question_goes_back_to_the_model():
@@ -84,8 +92,8 @@ def test_yes_to_a_model_question_goes_back_to_the_model():
     dialogue = Dialogue(resolver, clock=lambda: 0)
     dialogue.turn(heard('wake up at 6:30', 0.19501866, ('wake up', 0.28538975)), reason='unclear')
     turn = dialogue.turn(YES_PLEASE)
-    assert turn.reply == 'I have: set an alarm for 6:30 am. Shall I do that?'
-    assert dialogue.turn(YES_PLEASE_2).query == 'set an alarm for 6:30 am'
+    assert turn.proposal == 'set an alarm for 6:30 am'  # the assistant asks for its own "yes"
+    assert resolver.call_count == 2
 
 
 # --- the gate: spelling variants are not a different request ----------------------
@@ -142,11 +150,10 @@ def test_logged_delete_is_confirmed_once_and_deletes(assistant_with_reminder, co
 def test_clear_command_during_a_repair_takes_the_fast_path(assistant_with_reminder):
     assistant, reminders, resolver, output = assistant_with_reminder
     assistant.process_recognition(DEFINITION)
-    assert assistant.dialogue.repairing
     assistant.process_recognition(Recognition('delete my call mom reminder', 0.95))
     output.assert_called_with('Deleted: call mom, today at 9:00 PM.')
     assert resolver.call_count == 1
-    assert not assistant.dialogue.repairing
+    assert not assistant.state.pending
 
 
 # --- answers that overlapped Jarvis's own voice --------------------------------------

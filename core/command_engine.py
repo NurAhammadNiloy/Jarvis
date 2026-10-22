@@ -172,10 +172,26 @@ an error result does not imply rollback. Reuse services for active timer state.
         intent = route(query).intent
         command = understand_query(query, services)
         return execute_command(command, services, now=now, choose=choose)
-    except ServiceError as exc:
+    except Exception as exc:
+        return _error_result(exc, intent)
+
+
+def run_command(command, services=None, *, now=datetime.now, choose=random.choice):
+    """Execute an already parsed Command (e.g. one the user confirmed) with the
+same error boundary as execute_query. Its arguments are used as they are; the
+query is never parsed again.
+"""
+    services = services if services is not None else _default_services
+    try:
+        return execute_command(command, services, now=now, choose=choose)
+    except Exception as exc:
+        return _error_result(exc, command.intent)
+
+
+def _error_result(exc, intent):
+    if isinstance(exc, ServiceError):
         # A provider failed or timed out; its message is written to be spoken.
         return CommandResult("error", intent, (str(exc),), error="ServiceError")
-    except Exception as exc:
-        return CommandResult("error", intent,
-                             ("I'm sorry, I couldn't complete that command.",),
-                             error=type(exc).__name__)
+    return CommandResult("error", intent,
+                         ("I'm sorry, I couldn't complete that command.",),
+                         error=type(exc).__name__)
