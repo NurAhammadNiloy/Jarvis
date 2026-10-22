@@ -34,5 +34,6 @@ class ActionResult:
     messages: Tuple[str, ...]
     succeeded: bool = True
     pending: bool = False  # the service asked a question (e.g. which reminder)
+    pending_action: Optional[str] = None  # what the question is about; default 'choose_reminder'
     # Reverses this action ("undo", "no, that's wrong"); None when it cannot be undone.
     undo: Optional[Callable[[], None]] = field(default=None, compare=False)

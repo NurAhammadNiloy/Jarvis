@@ -216,3 +216,54 @@ def test_read_only_questions_do_not_replace_what_undo_reverses(jarvis):
     jarvis.hear(heard('Jarvis how much time left', 0.9406274))
     jarvis.hear(heard('undo', 0.9))
     assert jarvis.timers() == {}
+
+
+# --- "Which timer?" answers (seq 632 -> 658) ---------------------------------------------
+
+CANCEL_THE_TIMER = heard('Jarvis cancel the timer', 0.94590157, ('Yarvis cancel the timer', 0.94590157))   # 632
+FIVE_MINUTE_TIMER = heard('5-minute timer', 0.6653868, ('5 minute timer', 0.66916543))                     # 658
+
+
+def two_timers(jarvis):
+    jarvis.hear(CERTAIN_TIMER)                                        # Pasta, 25 minutes
+    jarvis.hear(heard('Jarvis set a timer for 5 minutes', 0.95))      # unnamed, 5 minutes
+    jarvis.hear(heard('Jarvis set a coffee timer for 4 minutes', 0.95))
+
+
+@pytest.mark.parametrize('answer, left', [
+    (FIVE_MINUTE_TIMER, {'Pasta', 'Coffee'}),
+    (heard('the pasta one', 0.8), {None, 'Coffee'}),
+    (heard('coffee', 0.8), {'Pasta', None}),
+    (heard('the coffee timer', 0.8), {'Pasta', None}),
+], ids=['5-minute timer', 'the pasta one', 'coffee', 'the coffee timer'])
+def test_which_timer_is_answered_by_name_or_length(jarvis, answer, left):
+    two_timers(jarvis)
+    jarvis.hear(CANCEL_THE_TIMER)
+    assert jarvis.said()[-1] == 'You have multiple timers. Which one should I cancel?'
+    assert jarvis.assistant.state.current.describe() == 'awaiting timer for cancel_timer'
+    jarvis.hear(answer)
+    assert set(jarvis.timers()) == left
+    jarvis.resolver.assert_not_called()
+
+
+def test_which_timer_works_for_pause_too(jarvis):
+    two_timers(jarvis)
+    jarvis.hear(heard('Jarvis pause the timer', 0.9))
+    jarvis.hear(heard('the pasta one', 0.8))
+    assert jarvis.timers()['Pasta'].state == TimerState.PAUSED
+    assert jarvis.timers()['Coffee'].state == TimerState.RUNNING
+
+
+def test_an_unclear_answer_lists_the_timers(jarvis):
+    two_timers(jarvis)
+    jarvis.hear(CANCEL_THE_TIMER)
+    jarvis.hear(heard('the blue one', 0.8))
+    assert jarvis.said()[-1] == 'Which one: pasta, the 5-minute one or coffee?'
+    assert len(jarvis.timers()) == 3
+
+
+def test_a_new_request_instead_of_an_answer_runs(jarvis):
+    two_timers(jarvis)
+    jarvis.hear(CANCEL_THE_TIMER)
+    jarvis.hear(heard('what time is it', 0.95))
+    assert jarvis.said()[-1].startswith('The current time is') and len(jarvis.timers()) == 3

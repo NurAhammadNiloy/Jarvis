@@ -91,7 +91,7 @@ class CommandServices:
 
     def timer_action(self, action, query, info):
         messages = []
-        kwargs = {"label": info.get("label"), "respond": messages.append}
+        kwargs = {"label": info.get("label"), "timer_id": info.get("timer_id"), "respond": messages.append}
         manager = self.timers
         if action == "cancel_all":
             manager.cancel_all_timers(respond=messages.append)
@@ -109,8 +109,11 @@ class CommandServices:
         elif action in ("cancel", "pause", "resume"):
             succeeded = getattr(manager, action + "_timer")(**kwargs)
         else:
-            succeeded = manager.create_timer(query, **kwargs) is not None
+            succeeded = manager.create_timer(query, label=kwargs['label'], respond=messages.append) is not None
         undo = self._timer_undo(action, info, manager) if succeeded else None
+        if not succeeded and messages and messages[-1].rstrip().endswith('Which one should I ' + action + '?'):
+            # "You have multiple timers. Which one should I cancel?": the answer picks one.
+            return ActionResult(tuple(messages), False, pending=True, pending_action='choose_timer')
         return ActionResult(tuple(messages), bool(succeeded), undo=undo)
 
     @staticmethod

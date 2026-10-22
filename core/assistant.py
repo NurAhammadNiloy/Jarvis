@@ -222,6 +222,8 @@ class Assistant:
         """Try the answer as the missing slot; only if that fails is it a new request."""
         if state.slot == 'task':
             return self._fill_task(recognition, text, state)
+        if state.slot == 'timer':
+            return self._fill_timer(recognition, text, state)
         # An answer that is a request of its own ('cancel the timer') is not a time.
         command = self._understand(completed) if route(text).intent == 'chat' else None
         question = self._time_question(command) if command else None
@@ -263,6 +265,30 @@ class Assistant:
                           dict(state.command.arguments, task=task or 'Reminder'))
         self.state.clear('filled')
         self._run(command)
+        return True
+
+    def _fill_timer(self, recognition, text, state):
+        """"Which timer?" answered by name ("the pasta one", "coffee"), by length
+        ("5-minute timer") or by number ("timer 2")."""
+        try:
+            timers = list(self.services.timers.active_timers())
+        except Exception:
+            timers = []
+        chosen = _match_timers(text, timers)
+        if not chosen and route(text).intent != 'chat' and not _TIMER_ANSWER.match(text):
+            self.state.clear('new request')
+            return None
+        record('pending_answer', state=state.describe(), answer='fill', text=text)
+        self.active_conversation = True
+        self.last_active_time = self.clock()
+        self.speech.stop()
+        if len(chosen) != 1 or recognition.confidence is not None and recognition.confidence < 0.5:
+            self.output('Which one: ' + _list_timers(timers) + '?')
+            return True
+        timer = chosen[0]
+        self.state.clear('filled')
+        self._run(Command(state.command.intent, state.command.query,
+                          dict(state.command.arguments, label=timer.label, timer_id=timer.id)))
         return True
 
     def _clear_slot_answer(self, recognition, state, command):
@@ -498,7 +524,10 @@ class Assistant:
             self._last_action = (undo, self.clock(), result.intent)
         elif result.status == 'handled' and result.intent in _NOT_UNDOABLE:
             self._last_action = (None, self.clock(), result.intent)
-        if result.pending_action == 'reminder_task':
+        if result.pending_action == 'choose_timer':
+            self.state.await_slot(result.intent, 'timer', query, result.messages[-1],
+                                  Command(result.intent, query, result.data['args']))
+        elif result.pending_action == 'reminder_task':
             self.state.await_slot(result.intent, 'task', query, result.messages[0],
                                   Command(result.intent, query, result.data['args']))
         elif result.pending_action == 'reminder_time':
@@ -586,3 +615,31 @@ def _cues(command, description, options):
     mine = set(words(description)) | _CUE_WORDS.get(command.intent, set())
     shared = set.intersection(*(set(words(o.query)) for o in options)) | _COMMON
     return frozenset(mine - shared)
+
+
+# --- "which timer?" ---------------------------------------------------------------------
+
+# An answer that is only about a timer ("the 5-minute timer") even though the router
+# would call it a new timer request.
+_TIMER_ANSWER = re.compile(r"^\W*(?:the\s+)?(?:\w+[\s-]+){0,3}(?:timer|one)\W*$", re.IGNORECASE)
+
+
+def _match_timers(text, timers):
+    """The timers an answer names: by label, by original length, or by number."""
+    from core.smart_timer import SmartTimerManager
+    spoken = set(words(text))
+    by_label = [t for t in timers if t.label and set(words(t.label)) & {w for w in spoken if len(w) > 2}
+                or t.label and any(_similar(w, s) for w in words(t.label) for s in spoken)]
+    if by_label:
+        return by_label
+    seconds, _ = SmartTimerManager.parse_duration(text.replace('-', ' '))
+    if seconds:
+        return [t for t in timers if t.duration_seconds == seconds]
+    numbers = {int(w) for w in spoken if w.isdigit()}
+    return [t for t in timers if t.id in numbers]
+
+
+def _list_timers(timers):
+    from core.command_description import duration_words
+    names = [t.label.lower() if t.label else f"the {duration_words(t.duration_seconds, True)} one" for t in timers]
+    return ', '.join(names[:-1]) + ' or ' + names[-1] if len(names) > 1 else ''.join(names)
