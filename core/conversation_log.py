@@ -53,6 +53,10 @@ def add_listener(listener):
     _listeners.append(listener)
 
 
+def has_listener(listener):
+    return listener in _listeners
+
+
 def remove_listener(listener):
     if listener in _listeners:
         _listeners.remove(listener)

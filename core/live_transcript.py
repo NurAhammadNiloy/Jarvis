@@ -3,6 +3,10 @@
   You (heard): "delete my call mom reminder"  conf 0.82 | intent delete_reminder | fast path | stt 0.9s, total 1.4s | Jarvis: "Deleted: ..."
   You (ignored: no wake word): "Deli"  conf 0.06 | stt 0.5s
 
+Each Jarvis reply is printed once: on the line of the utterance it answers, or
+on its own line ("Jarvis: ...") when nothing you said asked for it, e.g. a
+reminder going off.
+
 "total" runs from the end of your speech (as detected by the microphone, which
 is about 1.4 s of silence after your last word) to the first audio of Jarvis's
 reply. Partial (interruption) recognitions are not shown.
@@ -19,6 +23,7 @@ _REASONS = {
     'weak_wake_word': 'weak wake word',
     'unrecognized_while_response_pending': 'unrecognized, reply pending',
     'repeated_unrecognized_audio': 'unrecognized again',
+    'unrecognized_nothing_pending': 'unrecognized, nothing pending',
     'unaddressed_during_playback': 'spoke over Jarvis without "Jarvis"',
     'response_echo': "echo of Jarvis's own voice",
 }
@@ -57,7 +62,12 @@ class LiveTranscript:
     # --- event handling ------------------------------------------------------
 
     def _handle(self, event, f):
-        if event == 'utterance_ended':
+        if event == 'speech_queued':
+            if self._turn is not None and self._turn.reply_id is None:
+                self._turn.reply_id, self._turn.reply = f.get('playback_id'), f.get('text') or ''
+            else:
+                self._print(f"Jarvis: {f.get('text') or ''}")
+        elif event == 'utterance_ended':
             self._utterance_ended = self.clock()
         elif event == 'recognition_timing' and not f.get('partial'):
             self._stt_ms = f.get('duration_ms')
@@ -99,8 +109,6 @@ class LiveTranscript:
             self._turn.intent = f.get('intent') or ''
             if not self._turn.path:
                 self._turn.path = 'fast path'
-        elif event == 'speech_queued' and self._turn.reply_id is None:
-            self._turn.reply_id, self._turn.reply = f.get('playback_id'), f.get('text') or ''
         elif event == 'playback_chunk_started' and f.get('playback_id') == self._turn.reply_id:
             self._finish('heard', reply_started=True)
         elif event == 'speech_finished' and f.get('playback_id') == self._turn.reply_id:
@@ -136,7 +144,7 @@ class LiveTranscript:
         if timing:
             parts.append(', '.join(timing))
         if turn.reply:
-            parts.append(f'Jarvis: "{self._short(turn.reply)}"')
+            parts.append(f'Jarvis: "{" ".join(turn.reply.split())}"')  # in full: its only copy
         self._print(' | '.join(parts))
 
     def _short(self, text):
@@ -150,12 +158,22 @@ class LiveTranscript:
             self.out(line.encode('ascii', 'replace').decode('ascii'))
 
 
+_printer = None
+
+
 def enable(out=print):
     """Show live transcripts if settings.SHOW_TRANSCRIPTS (default True)."""
+    global _printer
     from config.settings import SHOW_TRANSCRIPTS
     if not SHOW_TRANSCRIPTS:
         return None
     from core.conversation_log import add_listener
-    printer = LiveTranscript(out)
+    printer = _printer = LiveTranscript(out)
     add_listener(printer)
     return printer
+
+
+def showing():
+    """Whether transcripts print Jarvis's replies (so nothing else should)."""
+    from core.conversation_log import has_listener
+    return _printer is not None and has_listener(_printer)

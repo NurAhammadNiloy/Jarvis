@@ -50,7 +50,9 @@ def synthesize_speech(text, voice_name="en-US-Wavenet-C", language_code="en-US",
     job.wait() is available for explicit synchronous callers. Generation and
     playback state are owned by one worker shared with background voice alerts.
     """
-    print(f"Jarvis: {text}")
+    from core.live_transcript import showing
+    if not showing():  # otherwise the transcript prints it, once
+        print(f"Jarvis: {text}")
     return get_speech_controller().submit(text, voice_name=voice_name,
         language_code=language_code, speaking_rate=speaking_rate, pitch=pitch,
         priority=priority)

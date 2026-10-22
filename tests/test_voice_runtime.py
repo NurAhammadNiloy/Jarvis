@@ -260,10 +260,12 @@ def test_wake_threshold_does_not_authorize_weak_inline_command():
 def test_repeated_recognition_failures_do_not_spam_or_extend_session():
     now = [0]
     assistant, services, output, _, _ = assistant_fixture(clock=lambda: now[0])
+    # Noise is only answered while Jarvis waits for something (and then once).
+    assistant.state.await_slot('alarm', 'time', 'set an alarm', 'What time should I set the alarm for?')
     now[0] = 50
     for _ in range(5):
         assistant.process_recognition(Recognition(error='unrecognized'))
-    output.assert_called_once()
+    output.assert_called_once_with("I couldn't hear that. What time should I set the alarm for?")
     assert assistant.last_active_time == 0
     assistant.process_recognition(Recognition('Jarvis', 0.7))
     assistant.process_recognition(Recognition(error='unrecognized'))

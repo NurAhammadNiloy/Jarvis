@@ -70,7 +70,11 @@ class Assistant:
             self.output(random.choice(['At your service, sir.', 'How can I help, sir?']))
             return True
         if recognition.error == 'unrecognized':
-            # Background noise must not repeatedly speak or extend the session.
+            # Background noise must not speak or extend the session. Only when
+            # Jarvis is waiting for an answer is it worth saying so, once.
+            if not self.state.pending:
+                record('voice_decision', decision='ignore', reason='unrecognized_nothing_pending', text='')
+                return False
             if self.speech.is_speaking():
                 record('voice_decision', decision='ignore', reason='unrecognized_while_response_pending', text='')
                 return False
@@ -78,7 +82,7 @@ class Assistant:
                 record('voice_decision', decision='ignore', reason='repeated_unrecognized_audio', text='')
                 return False
             self._recognition_failure_prompted = True
-            prompt = "I couldn't hear that clearly. Please try again."
+            prompt = "I couldn't hear that. " + self.state.current.prompt
             record('voice_decision', decision='clarify', reason='unrecognized_audio', text='', prompt=prompt)
             self.output(prompt)
             return True

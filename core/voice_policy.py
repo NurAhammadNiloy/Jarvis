@@ -67,6 +67,15 @@ def _comparable(text):
     return tuple(tokens)
 
 
+def _same_wording(a, b):
+    """Spelling variants of the same words ('stretch' / 'strech') are not a
+    different request; different names ('Mom' / 'Mam') are."""
+    from difflib import SequenceMatcher
+    return len(a) == len(b) and all(
+        x == y or (not any(c.isdigit() for c in x + y) and SequenceMatcher(None, x, y).ratio() >= 0.85)
+        for x, y in zip(a, b))
+
+
 def conflict_reason(result, important=False):
     """'meaning' if alternatives differ in a protected word or number, 'wording'
     if an important request's alternatives differ only in other words
@@ -81,7 +90,7 @@ def conflict_reason(result, important=False):
         other_signature = tuple(w for w in other if w in PROTECTED or any(c.isdigit() for c in w))
         if other_signature != signature:
             return 'meaning'
-        if important and other != primary:
+        if important and not _same_wording(other, primary):
             reason = 'wording'
     return reason
 

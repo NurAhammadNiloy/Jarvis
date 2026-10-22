@@ -120,6 +120,7 @@ def test_main_restores_reminders_before_listening(monkeypatch):
     from core import conversation_log
     monkeypatch.setattr(conversation_log, 'start_logging', lambda: 'test-log')
     monkeypatch.setattr(conversation_log, 'record', Mock())
+    monkeypatch.setattr(conversation_log, '_listeners', [])  # main() turns transcripts on
     events = []
 
     class Assistant:

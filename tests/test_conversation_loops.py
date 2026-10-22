@@ -15,7 +15,7 @@ from core.assistant import Assistant
 from core.command_services import CommandServices
 from core.dialogue import Dialogue
 from core.live_transcript import LiveTranscript
-from core.voice_policy import Hypothesis, Recognition
+from core.voice_policy import Hypothesis, Recognition, conflict_reason
 
 
 def heard(text, confidence, *alternatives):
@@ -46,9 +46,6 @@ DEFINITION = heard('definition', 0.084044158, ('vision', 0.12234839), ('definati
 TZ = ZoneInfo('Europe/Helsinki')
 NOW = datetime(2026, 10, 22, 10, 36, 9, tzinfo=TZ)
 IN_TWO_MINUTES = NOW + timedelta(minutes=2)
-
-# Fails on the code as it was during the session; removed as each step fixes it.
-baseline = pytest.mark.xfail(strict=True, reason='baseline: fails before the fix')
 ALARM_PROPOSAL = {'reply': 'Setting an alarm.', 'query': 'set an alarm for 2 minutes from now'}  # 340
 
 
@@ -104,12 +101,19 @@ def test_confirmed_proposal_executes_its_parsed_values_without_asking_again(jarv
 
 # --- a clear reminder is not "unclear audio" --------------------------------------------
 
-@baseline
 def test_reminder_with_a_spelling_variant_takes_the_fast_path(jarvis):
     jarvis.hear(STRETCH)
     assert jarvis.said() == ['Reminder set for today at 10:38 AM: stretch.']
     assert jarvis.pending() == [('reminder', IN_TWO_MINUTES)]
     jarvis.resolver.assert_not_called()
+
+
+def test_spelling_variants_are_not_a_conflict_but_names_and_meridiem_are():
+    # Why 0.94 was "unclear audio": 'stretch' / 'strech' counted as different wording.
+    assert conflict_reason(STRETCH, important=True) is None
+    assert conflict_reason(heard('remind me to call Mom', 0.9, ('remind me to call Mam', 0.9)), important=True) == 'wording'
+    assert conflict_reason(heard('set an alarm at 7 am', 0.9, ('set an alarm at 7 pm', 0.9)), important=True) == 'wording'
+    assert conflict_reason(heard('in 2 minutes', 0.9, ('in 3 minutes', 0.9)), important=True) == 'meaning'
 
 
 # --- confirmation in any dialogue state -----------------------------------------------
@@ -212,7 +216,6 @@ def test_proposal_without_a_time_asks_for_it_instead_of_shall_i(jarvis):
 
 # --- unrecognized audio ---------------------------------------------------------------
 
-@baseline
 def test_unrecognized_audio_with_nothing_pending_is_ignored_silently(jarvis):
     for _ in range(3):
         assert not jarvis.hear(NOISE)
@@ -220,7 +223,6 @@ def test_unrecognized_audio_with_nothing_pending_is_ignored_silently(jarvis):
     jarvis.resolver.assert_not_called()
 
 
-@baseline
 @pytest.mark.parametrize('setup', [pending_confirmation, pending_time])
 def test_unrecognized_audio_while_waiting_says_so(jarvis, setup):
     setup(jarvis)
@@ -230,7 +232,6 @@ def test_unrecognized_audio_while_waiting_says_so(jarvis, setup):
 
 # --- the terminal -------------------------------------------------------------------
 
-@baseline
 def test_each_reply_is_printed_exactly_once(monkeypatch, capsys):
     from core import speech_synthesis, live_transcript
 
