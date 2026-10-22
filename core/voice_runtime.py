@@ -176,6 +176,7 @@ class ContinuousListener:
             return None
         result = self._transcribe(AudioUtterance(utterance.after_playback_pcm))
         if result.error or not result.text:
+            record('voice_filter', reason='nothing_after_playback', text=result.text, uid=result.uid)
             return None
         record('voice_filter_passed', reason='spoke_after_playback', text=result.text, uid=result.uid)
         return result

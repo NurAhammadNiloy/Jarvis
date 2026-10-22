@@ -174,7 +174,8 @@ class ConfidenceGate:
             self._repeat = None
             prompt = ("That recording was incomplete. Please say the command again."
                       if result.truncated else "I couldn't hear that clearly. Please try again.")
-            return VoiceDecision('clarify', prompt=prompt)
+            return VoiceDecision('clarify', prompt=prompt,
+                                 reason='incomplete_recording' if result.truncated else result.error)
         if not text:
             return VoiceDecision('ignore')
         if is_stop(text) and can_interrupt(result):

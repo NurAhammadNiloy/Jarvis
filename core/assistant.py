@@ -28,12 +28,17 @@ class Assistant:
         if output is None:
             from core.speech_synthesis import synthesize_speech
             output = synthesize_speech
-        self.listener, self.speech, self.output = listener, speech, output
-        if self.dialogue is not None:
-            def conversational_output(text):
+        self.listener, self.speech = listener, speech
+        self._turn_uid = None
+
+        def reply(text):
+            # Marks this as the reply to the utterance being handled, so the
+            # transcript never mistakes an alarm going off for it.
+            record('assistant_reply', uid=self._turn_uid, text=text)
+            if self.dialogue is not None:
                 self.dialogue.observe('assistant', text)
-                return output(text)
-            self.output = conversational_output
+            return output(text)
+        self.output = reply
         self.services = services if services is not None else CommandServices(VoiceNotifications())
         self.clock = clock
         self.gate = ConfidenceGate(clock)
@@ -48,11 +53,13 @@ class Assistant:
         """Only final, accepted transcripts may reach execute_query."""
         if recognition is None:
             return False
-        record('turn_started', uid=recognition.uid, text=recognition.text,
-               confidence=recognition.confidence, error=recognition.error)
+        record('turn_started', uid=recognition.uid, text=recognition.text, confidence=recognition.confidence,
+               error=recognition.error, truncated=recognition.truncated)
+        self._turn_uid = recognition.uid
         try:
             return self._process(recognition, passive)
         finally:
+            self._turn_uid = None
             record('turn_finished', uid=recognition.uid, window=self.window_state())
 
     def window_state(self):
@@ -133,7 +140,7 @@ class Assistant:
             if decision.kind == 'accept':
                 self.dialogue.clear()
             self.dialogue.observe('user', text)
-        record('voice_decision', decision=decision.kind, text=text,
+        record('voice_decision', decision=decision.kind, text=text, reason=decision.reason,
                prompt=decision.prompt, playback_id=recognition.playback_id)
         if decision.kind == 'ignore':
             return False

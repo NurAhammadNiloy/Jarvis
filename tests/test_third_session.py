@@ -273,3 +273,23 @@ def test_transcript_line_shows_the_window(jarvis):
     finally:
         conversation_log.remove_listener(printer)
     assert lines == ['You (ignored: low confidence, no wake word): "who won against Superman"  conf 0.13 | passive']
+
+
+def test_unrecognized_audio_after_an_echo_gets_an_outcome_line():
+    # 26c7df06 237/240: echo discarded, the audio after it re-recognized as nothing.
+    lines = []
+    printer = LiveTranscript(out=lines.append)
+    conversation_log.add_listener(printer)
+    try:
+        speech = Mock()
+        speech.snapshot.return_value = SpeechSnapshot()
+        results = iter([Recognition(error='unrecognized'), Recognition(error='unrecognized')])
+        listener = ContinuousListener(Mock(), lambda frame: False, lambda pcm, partial=False: next(results), speech,
+                                      VoiceConfig(echo_mode='speakers'))
+        assert listener.handle_final(AudioUtterance(b'all', playback_id=10, playback_text='This is your alarm.',
+                                                    after_playback_pcm=b'after')) is None
+    finally:
+        conversation_log.remove_listener(printer)
+    assert lines == ['You (ignored: Jarvis speaking (speakers mode)): "(unrecognized)"  conf - | stt 0.0s',
+                     'You (ignored: nothing clear after Jarvis stopped (speakers mode)): "(unrecognized)"  conf -'
+                     ' | stt 0.0s']

@@ -31,7 +31,11 @@ _REASONS = {
     'unaddressed_during_playback': 'spoke over Jarvis without "Jarvis"',
     'response_echo': "echo of Jarvis's own voice",
     'speakers_mode': 'Jarvis speaking (speakers mode)',
+    'nothing_after_playback': 'nothing clear after Jarvis stopped (speakers mode)',
 }
+# What to show instead of words when there were none.
+_NO_WORDS = {'unrecognized': '(unrecognized)', 'stale_recording': '(recording too old to use)',
+             'input_overflow': '(microphone overflow)'}
 
 
 @dataclass
@@ -51,6 +55,8 @@ class _Turn:
     reply_started_at: object = None
     window: str = ''
     started: bool = False
+    truncated: bool = False
+    expected_reply: object = None  # what the assistant said it is replying
 
 
 class LiveTranscript:
@@ -86,7 +92,7 @@ class LiveTranscript:
             turn = self._turns.get(f.get('uid'))
             if turn is not None:
                 reason = f.get('reason')
-                verb = 'ignored' if reason == 'speakers_mode' else 'rejected'
+                verb = 'ignored' if reason in ('speakers_mode', 'nothing_after_playback') else 'rejected'
                 self._print_turn(turn, f"{verb}: {_REASONS.get(reason, reason)}")
         elif event == 'turn_started':
             self._start(f)
@@ -98,8 +104,13 @@ class LiveTranscript:
                     self._waiting[turn.reply_id] = turn
                 else:
                     self._print_turn(turn)
+        elif event == 'assistant_reply':
+            if self._current is not None and self._current.expected_reply is None:
+                self._current.expected_reply = f.get('text')
         elif event == 'speech_queued':
-            if self._current is not None and self._current.reply_id is None:
+            current = self._current
+            if (current is not None and current.reply_id is None and
+                    current.expected_reply is not None and current.expected_reply == f.get('text')):
                 self._current.reply_id, self._current.reply = f.get('playback_id'), f.get('text') or ''
             else:
                 self._print(f"Jarvis: {f.get('text') or ''}")
@@ -127,6 +138,7 @@ class LiveTranscript:
         turn = self._turns.get(uid)
         if turn is None:  # e.g. a stale-recording notice that was never recognized
             turn = self._turns[uid] = _Turn(uid, f.get('text') or '', f.get('confidence'), f.get('error'))
+        turn.truncated = turn.truncated or bool(f.get('truncated'))
         turn.started = True
         self._current = turn
 
@@ -163,8 +175,9 @@ class LiveTranscript:
 
     def _print_turn(self, turn, status=None):
         self._turns.pop(turn.uid, None)
-        status = status or turn.status or 'heard'
-        heard = self._short(turn.text) or '(unrecognized)'
+        status = status or turn.status or ('heard' if turn.text else 'not understood')
+        heard = self._short(turn.text) or ('(incomplete recording)' if turn.truncated else
+                                           _NO_WORDS.get(turn.error, f'({turn.error})' if turn.error else '(no words)'))
         confidence = f"{turn.confidence:.2f}" if isinstance(turn.confidence, (int, float)) else '-'
         parts = [f'You ({status}): "{heard}"  conf {confidence}']
         if status == 'heard' and turn.text and turn.path != 'wake word':
@@ -172,7 +185,7 @@ class LiveTranscript:
             parts.append(f"intent {turn.intent or route(addressed if addressed is not None else turn.text).intent}")
             if turn.path:
                 parts.append(turn.path)
-        elif status == 'heard' and turn.path:
+        elif status in ('heard', 'not understood') and turn.path:
             parts.append(turn.path)
         if turn.window:
             parts.append(turn.window)

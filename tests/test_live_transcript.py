@@ -30,6 +30,11 @@ def started(uid):
     return ('turn_started', {'uid': uid})
 
 
+def said(playback_id, text):
+    """The assistant marks its reply, then the speech controller queues it."""
+    return [('assistant_reply', {'text': text}), ('speech_queued', {'playback_id': playback_id, 'text': text})]
+
+
 def finished(uid, window='active 10s'):
     return ('turn_finished', {'uid': uid, 'window': window})
 
@@ -42,7 +47,7 @@ def test_fast_path_line_has_intent_path_window_and_timings():
         started(1),
         ('voice_decision', {'decision': 'accept'}),
         ('command_result', {'intent': 'delete_reminder', 'status': 'handled'}),
-        ('speech_queued', {'playback_id': 4, 'text': 'Deleted: call mom, today at 9:00 PM.'}),
+        *said(4, 'Deleted: call mom, today at 9:00 PM.'),
         finished(1), 0.5,
         ('playback_chunk_started', {'playback_id': 4}),
     ])
@@ -78,7 +83,7 @@ def test_dialogue_path_shows_why_the_model_was_used():
         started(1),
         ('dialogue_turn', {'reply': 'Shall I?', 'duration_ms': 800, 'model_called': True,
                            'trigger': 'similar alternatives'}),
-        ('speech_queued', {'playback_id': 5, 'text': 'Shall I?'}),
+        *said(5, 'Shall I?'),
         finished(1), 0.5,
         ('playback_chunk_started', {'playback_id': 5}),
     ])
@@ -93,7 +98,7 @@ def test_reply_goes_to_its_own_utterance_even_when_the_next_was_heard_first():
         recognition(2, '', error='unrecognized'),    # heard while ChatGPT is thinking
         started(1),
         ('dialogue_turn', {'reply': 'Finland is a Nordic country.', 'duration_ms': 900, 'model_called': True}),
-        ('speech_queued', {'playback_id': 7, 'text': 'Finland is a Nordic country.'}),
+        *said(7, 'Finland is a Nordic country.'),
         ('playback_chunk_started', {'playback_id': 7}),  # may start before the turn ends
         finished(1),
         started(2), ('voice_decision', {'decision': 'ignore', 'reason': 'unrecognized_nothing_pending'}),
@@ -149,12 +154,12 @@ def test_answers_to_a_pending_state_show_what_they_answered():
         recognition(1, '2 minutes from now', 0.94), started(1),
         ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'fill'}),
         ('command_result', {'intent': 'alarm', 'status': 'handled'}),
-        ('speech_queued', {'playback_id': 2, 'text': 'Alarm set for today at 10:38 AM.'}),
+        *said(2, 'Alarm set for today at 10:38 AM.'),
         finished(1),
         ('playback_chunk_started', {'playback_id': 2}),
         recognition(2, 'Jarvis stop', 0.73), started(2),
         ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'cancel'}),
-        ('speech_queued', {'playback_id': 3, 'text': 'Cancelled.'}),
+        *said(3, 'Cancelled.'),
         finished(2),
         ('playback_chunk_started', {'playback_id': 3}),
     ])
@@ -162,3 +167,36 @@ def test_answers_to_a_pending_state_show_what_they_answered():
                                ' | answer (awaiting time for alarm)')
     assert lines[0].endswith('Jarvis: "Alarm set for today at 10:38 AM."')
     assert ' | cancelled | ' in lines[1] and lines[1].endswith('Jarvis: "Cancelled."')
+
+
+def test_alarm_going_off_during_a_turn_gets_its_own_line():
+    lines = feed([
+        recognition(1, 'Jarvis set an alarm', 0.79), started(1),
+        ('speech_queued', {'playback_id': 6, 'text': "Sir, it's 11:24 AM. This is your alarm."}),
+        *said(7, 'What time should I set the alarm for?'),
+        finished(1), ('playback_chunk_started', {'playback_id': 7}),
+    ])
+    assert lines[0] == "Jarvis: Sir, it's 11:24 AM. This is your alarm."
+    assert lines[1].endswith('Jarvis: "What time should I set the alarm for?"')
+
+
+def test_every_line_without_words_says_what_happened():
+    lines = feed([
+        recognition(1, '', error='unrecognized'),
+        ('voice_filter', {'reason': 'nothing_after_playback', 'uid': 1}),
+        recognition(2, '', error='unrecognized'), started(2),
+        ('voice_decision', {'decision': 'clarify', 'reason': 'unrecognized_audio'}),
+        *said(3, "I couldn't hear that. What time should I set the alarm for?"), finished(2),
+        ('playback_chunk_started', {'playback_id': 3}),
+        ('turn_started', {'uid': 3, 'text': '', 'error': 'stale_recording'}),
+        ('voice_decision', {'decision': 'clarify', 'reason': 'stale_recording'}), finished(3),
+        ('turn_started', {'uid': 4, 'text': '', 'error': None, 'truncated': True}),
+        ('voice_decision', {'decision': 'clarify', 'reason': 'incomplete_recording'}), finished(4),
+    ])
+    assert lines == [
+        'You (ignored: nothing clear after Jarvis stopped (speakers mode)): "(unrecognized)"  conf -',
+        'You (not understood): "(unrecognized)"  conf - | clarification (unrecognized audio) | active 10s'
+        ' | Jarvis: "I couldn\'t hear that. What time should I set the alarm for?"',
+        'You (not understood): "(recording too old to use)"  conf - | clarification (stale recording) | active 10s',
+        'You (not understood): "(incomplete recording)"  conf - | clarification (incomplete recording) | active 10s',
+    ]
