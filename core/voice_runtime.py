@@ -145,6 +145,15 @@ class ContinuousListener:
             if self.config.echo_mode == 'speakers' and (echo or not (addressed or stop_heard(result, 0.35))):
                 # Began while Jarvis was audible (or within 0.3 s after): only
                 # "Jarvis ..." or "stop" count. Keep what you said afterwards.
+                if (not echo and result.text and result.confidence is not None and result.confidence >= 0.8
+                        and result.playback_text.rstrip().endswith('?')):
+                    kept = self._after_playback(utterance)
+                    if kept is None:
+                        # Clearly heard, but said over Jarvis's question: tell the assistant,
+                        # which keeps the window open and shows that you should repeat it.
+                        return replace(result, error='said_over_jarvis')
+                    record('voice_filter', reason='speakers_mode', text=result.text, uid=result.uid)
+                    return kept
                 record('voice_filter', reason='speakers_mode', text=result.text, uid=result.uid)
                 return self._after_playback(utterance)
             if echo:

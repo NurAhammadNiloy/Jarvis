@@ -83,6 +83,13 @@ class Assistant:
     def _process(self, recognition, passive):
         if recognition.error and recognition.error.startswith('microphone_'):
             raise RuntimeError('Microphone capture failed: ' + recognition.error)
+        if recognition.error == 'said_over_jarvis':
+            # Heard clearly over Jarvis's question (speakers mode): not acted on, but the
+            # window stays open so you can repeat it.
+            record('voice_decision', decision='ignore', reason='said_over_jarvis', text=recognition.text)
+            if self.active_conversation:
+                self.last_active_time = self.clock()
+            return False
         addressed = strip_wake_word(recognition.text)
         if passive and addressed is None:
             record('voice_decision', decision='ignore', reason='no_wake_word', text=recognition.text)

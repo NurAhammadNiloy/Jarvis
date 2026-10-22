@@ -145,7 +145,9 @@ class LiveTranscript:
     def _annotate(self, turn, event, f):
         if event == 'voice_decision':
             decision, reason = f.get('decision'), f.get('reason')
-            if decision == 'ignore':
+            if decision == 'ignore' and reason == 'said_over_jarvis':
+                turn.status = 'said over Jarvis — please repeat'
+            elif decision == 'ignore':
                 turn.status = f"ignored: {_REASONS.get(reason, reason)}"
             elif decision == 'stop':
                 turn.path = 'stop'

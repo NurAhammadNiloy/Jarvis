@@ -332,7 +332,7 @@ def test_speakers_mode_discards_echo_and_hears_what_followed(capsys):
     assert recognize.call_args_list[1].args[0] == b'after'
 
 
-@pytest.mark.parametrize('overheard', [ECHO, SHALL_I_YES, heard('what time is it', 0.95)])
+@pytest.mark.parametrize('overheard', [ECHO, SHALL_I_YES, heard('what time is it', 0.75)])
 def test_speakers_mode_discards_everything_said_over_jarvis(overheard):
     listener, recognize, speech = speakers_listener(overheard)
     utterance = AudioUtterance(b'all', playback_id=16, playback_text=SHALL_I)

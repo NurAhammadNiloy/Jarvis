@@ -428,3 +428,71 @@ def test_window_state_shows_the_longer_window_after_a_question():
     assert assistant.window_state() == 'active 20s'
     now[0] = 5
     assert assistant.window_state() == 'active 15s'
+
+
+# --- said over Jarvis's question (193aa5d4 seq 235 / 361) ------------------------------
+
+OVER_QUESTION = heard('no anything related to Earth you can send me', 0.89244109,           # 235
+                      ('no anything related to art you can send me', 0.9),
+                      ('know anything related to Earth you can send me', 0.89), playback_id=8)
+QUESTION_TEXT = ("There's always something fascinating happening in the universe, from stars being born "
+                 "to galaxies colliding. Is there a specific topic or event you're curious about?")
+
+
+def over_jarvis(recognition, playback_text=QUESTION_TEXT, after=None):
+    speech = Mock()
+    speech.snapshot.return_value = SpeechSnapshot()
+    results = iter([recognition] + ([after] if after else []))
+    listener = ContinuousListener(Mock(), lambda frame: False, lambda pcm, partial=False: next(results), speech,
+                                  VoiceConfig(echo_mode='speakers'))
+    utterance = AudioUtterance(b'all', playback_id=8, playback_text=playback_text,
+                               after_playback_pcm=b'after' if after else b'')
+    return listener.handle_final(utterance)
+
+
+def test_clear_speech_over_a_question_is_flagged_not_dropped():
+    result = over_jarvis(OVER_QUESTION)
+    assert result.error == 'said_over_jarvis' and result.text == OVER_QUESTION.text
+
+
+@pytest.mark.parametrize('recognition, playback_text', [
+    (replace(OVER_QUESTION, confidence=0.79), QUESTION_TEXT),                      # not clear enough
+    (OVER_QUESTION, 'Reminder set for today at 12:58 PM: stretch.'),               # no question asked
+    (replace(OVER_QUESTION, text=QUESTION_TEXT), QUESTION_TEXT),                   # Jarvis's own echo
+], ids=['below 0.8', 'no question asked', 'echo'])
+def test_other_overlaps_are_still_just_discarded(recognition, playback_text):
+    assert over_jarvis(recognition, playback_text) is None
+
+
+def test_speech_after_jarvis_stopped_is_used_instead_of_flagged():
+    result = over_jarvis(OVER_QUESTION, after=heard('no anything related to Earth you can send me', 0.91))
+    assert result.error is None and result.text == OVER_QUESTION.text
+
+
+def test_assistant_keeps_the_window_open_and_stays_quiet(jarvis):
+    now = [0]
+    assistant = jarvis.assistant
+    assistant.clock = lambda: now[0]
+    assistant.active_conversation = True
+    assistant.last_active_time = 0
+    now[0] = 18
+    assert not jarvis.hear(replace(OVER_QUESTION, error='said_over_jarvis', playback_id=None))
+    assert assistant.last_active_time == 18 and assistant.active_conversation
+    jarvis.output.assert_not_called()
+    jarvis.resolver.assert_not_called()
+
+
+def test_transcript_says_to_repeat():
+    lines = []
+    printer = LiveTranscript(out=lines.append)
+    conversation_log.add_listener(printer)
+    try:
+        assistant = Assistant(Mock(), Mock(), Mock(spec=CommandServices), Mock(), clock=lambda: 0)
+        assistant.active_conversation = True
+        recognition = replace(OVER_QUESTION, error='said_over_jarvis', playback_id=None)
+        record_recognition(recognition)
+        assistant.process_recognition(recognition)
+    finally:
+        conversation_log.remove_listener(printer)
+    assert len(lines) == 1 and lines[0].startswith(
+        'You (said over Jarvis — please repeat): "no anything related to Earth you can send me"  conf 0.89')
