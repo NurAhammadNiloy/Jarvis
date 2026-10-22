@@ -65,8 +65,8 @@ def db_path(tmp_path):
 def make_service(db_path, clock, spoken, legacy_json=None):
     from core.reminder_manager import ReminderService
     from core.reminder_store import ReminderStore
-    return ReminderService(ReminderStore(db_path, legacy_json=legacy_json), notify=spoken.append,
-                           clock=clock, zone=TZ)
+    return ReminderService(ReminderStore(db_path, legacy_json=legacy_json, zone=TZ), notify=spoken.append,
+                           clock=clock)
 
 
 @pytest.fixture
@@ -380,13 +380,15 @@ def test_migrates_legacy_json_once_and_keeps_the_file(tmp_path, clock, spoken):
     ]))
     original = legacy.read_text()
     db = tmp_path / 'reminders.db'
-    service = make_service(db, clock, spoken, legacy_json=legacy)
-    assert service.store.migrated == 3
-    rows = {r.text: r for r in service.store.all()}
+    from core.reminder_store import ReminderStore
+    store = ReminderStore(db, legacy_json=legacy, zone=TZ)
+    assert store.migrated == 3
+    rows = {r.text: r for r in store.all()}
     assert rows['call my mom'].due == at(11, 2, 8, 20) and rows['call my mom'].status == 'pending'
     assert rows['stretch'].recurrence == 'daily'
     assert rows['call my wife'].status == 'done'
+    assert rows['stretch'].due.hour == 7 and rows['stretch'].due.tzinfo is not None
     assert legacy.read_text() == original
-    again = make_service(db, clock, spoken, legacy_json=legacy)
-    assert again.store.migrated == 0
-    assert len(again.store.all()) == 3
+    again = ReminderStore(db, legacy_json=legacy, zone=TZ)
+    assert again.migrated == 0
+    assert len(again.all()) == 3
