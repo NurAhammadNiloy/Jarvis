@@ -84,6 +84,10 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         return action_reply(services.list_reminders(kind="alarm"))
     if intent in ("reminder", "create_reminder", "alarm"):
         task, due, question = args.get('task'), args.get('due'), args.get('question')
+        if due is not None and not task and args.get('kind', 'reminder') != 'alarm':
+            # A reminder needs something to remind about; the time is kept for the answer.
+            return reply("What should I remind you about?", status="pending", pending_action="reminder_task",
+                         data={"args": dict(args)})
         if due is not None:
             return action_reply(services.reminder(args))
         if question:

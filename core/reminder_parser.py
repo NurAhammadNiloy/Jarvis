@@ -220,6 +220,12 @@ def parse_reminder(text, now):
                 date_value = WEEKDAYS.index(match.group('wd').lower())
             break
     source.take(_PART_OF_DAY)
+    if relative is None and clock is None and date_kind is None and recurrence == 'none' and kind == 'reminder':
+        # "set a reminder for 2 minutes": a number with a unit after "for" is a duration, but
+        # only when nothing else is left to be the task ("remind me to run for 30 minutes" is a task).
+        trial = _Text(source.working)
+        if trial.take(_ALARM_RELATIVE) and not _has_words(trial.remainder()):
+            relative = source.take(_ALARM_RELATIVE)
     task = _alarm_label(source.remainder()) if kind == 'alarm' else source.remainder()
 
     def ask(question):

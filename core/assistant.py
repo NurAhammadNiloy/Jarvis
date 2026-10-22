@@ -3,6 +3,7 @@ from dataclasses import replace
 import random
 import time
 
+from core.command_result import Command
 from core.command_engine import execute_query, run_command, understand_query
 from core.command_output import VoiceNotifications, deliver_result
 from core.command_services import CommandServices
@@ -187,6 +188,8 @@ class Assistant:
 
     def _fill_slot(self, recognition, text, state, completed):
         """Try the answer as the missing slot; only if that fails is it a new request."""
+        if state.slot == 'task':
+            return self._fill_task(recognition, text, state)
         # An answer that is a request of its own ('cancel the timer') is not a time.
         command = self._understand(completed) if route(text).intent == 'chat' else None
         question = self._time_question(command) if command else None
@@ -205,6 +208,29 @@ class Assistant:
         else:
             self.state.clear('filled')
             self._run(command)
+        return True
+
+    def _fill_task(self, recognition, text, state):
+        """The answer names what to be reminded about; the time was already parsed.
+        An answer that is only a time (or nothing) is saved as 'Reminder'."""
+        from core.reminder_parser import parse_reminder
+        if route(text).intent != 'chat' or recognition.error or recognition.truncated:
+            self.state.clear('new request')
+            return None
+        record('pending_answer', state=state.describe(), answer='fill', text=text)
+        self.active_conversation = True
+        self.last_active_time = self.clock()
+        self.speech.stop()
+        try:  # the same words as "remind me to <answer>": time expressions are removed
+            task = parse_reminder('remind me to ' + text, self.services.now()).task
+        except Exception:
+            task = None
+        if task is not None and (recognition.confidence or 0) < 0.5:
+            task = None
+        command = Command(state.command.intent, state.command.query,
+                          dict(state.command.arguments, task=task or 'Reminder'))
+        self.state.clear('filled')
+        self._run(command)
         return True
 
     def _clear_slot_answer(self, recognition, state, command):
@@ -310,7 +336,10 @@ class Assistant:
         result = run()
         record('command_result', status=result.status, intent=result.intent, messages=list(result.messages),
                pending_action=result.pending_action, duration_ms=round((time.monotonic() - started) * 1000))
-        if result.pending_action == 'reminder_time':
+        if result.pending_action == 'reminder_task':
+            self.state.await_slot(result.intent, 'task', query, result.messages[0],
+                                  Command(result.intent, query, result.data['args']))
+        elif result.pending_action == 'reminder_time':
             # The answer completes this request: "set an alarm" + "2 minutes from now".
             self.state.await_slot(result.intent, 'time',
                                   result.data.get('query') or f"remind me to {result.data['task']}",

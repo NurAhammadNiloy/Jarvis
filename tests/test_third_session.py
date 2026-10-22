@@ -333,3 +333,58 @@ def test_changing_proposals_still_need_confirmation(jarvis):
     jarvis.resolver.return_value = {'reply': 'Ok.', 'query': 'delete my dentist reminder'}
     jarvis.hear(heard('Jarvis get rid of the dentist thing', 0.9))
     assert jarvis.said()[-1] == 'I have: delete my dentist reminder. Shall I do that?'
+
+
+# --- "for <number> <unit>" in reminders (session 5472c258, 12:21) ---------------------
+
+FOR_TWO = heard('set a reminder for 2 minutes', 0.95373708)      # 385, 408 (0.96)
+
+
+@pytest.mark.parametrize('phrase, task, minutes', [
+    ('set a reminder for 2 minutes', None, 2), ('remind me for 5 minutes', None, 5),
+    ('remind me for an hour', None, 60),
+    ('remind me to run for 30 minutes at 6 pm', 'run for 30 minutes', None),   # another time given: task text
+    ('remind me to run for 30 minutes', 'run for 30 minutes', None),
+    ('remind me to book a table for 4 at 7 pm', 'book a table for 4', None),   # no unit: task text
+    ('remind me to stretch in 2 minutes', 'stretch', 2),
+])
+def test_for_number_with_unit_is_a_duration_only_when_nothing_else_is_the_task(phrase, task, minutes):
+    from core.reminder_parser import parse_reminder
+    request = parse_reminder(phrase, NOW)
+    assert request.task == task
+    if minutes:
+        assert request.due == NOW + timedelta(minutes=minutes)
+    else:
+        assert request.due != NOW + timedelta(minutes=30)  # "for 30 minutes" stayed in the task
+
+
+def test_reminder_without_a_task_asks_what_to_remind_about(jarvis):
+    jarvis.hear(FOR_TWO)
+    assert jarvis.said() == ['What should I remind you about?']
+    assert jarvis.stored() == []
+    jarvis.hear(heard('Jarvis stretch', 0.9))   # addressed, as people do
+    assert jarvis.said()[-1] == 'Reminder set for today at 11:26 AM: stretch.'
+    assert jarvis.stored() == [('reminder', 'stretch', NOW + timedelta(minutes=2))]
+
+
+@pytest.mark.parametrize('answer', [heard('in 2 minutes', 0.81), heard('stretch', 0.3), heard('at 5 pm', 0.9)],
+                         ids=['only a time', 'unclear (0.3)', 'only a clock time'])
+def test_unclear_task_answer_is_saved_as_reminder_never_as_a_time(jarvis, answer):
+    jarvis.hear(FOR_TWO)
+    jarvis.hear(answer)
+    assert jarvis.stored() == [('reminder', 'Reminder', NOW + timedelta(minutes=2))]
+    assert 'minutes' not in jarvis.stored()[0][1]
+
+
+def test_session_exchange_no_longer_saves_the_time_as_the_task(jarvis):
+    # Logged: "set a reminder for 2 minutes" -> "When should I remind you?" -> "in 2 minutes"
+    # saved "remind me to 2 minutes in 2 minutes" with the task "2 minutes".
+    jarvis.hear(FOR_TWO)
+    jarvis.hear(heard('in 2 minutes', 0.81))
+    assert all(task != '2 minutes' for _, task, _ in jarvis.stored())
+
+
+def test_task_answer_that_is_a_command_is_a_new_request(jarvis):
+    jarvis.hear(FOR_TWO)
+    jarvis.hear(heard('what time is it', 0.95))
+    assert jarvis.said()[-1].startswith('The current time is') and jarvis.stored() == []

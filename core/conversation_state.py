@@ -132,6 +132,7 @@ class AwaitingSlot:
     slot: str     # e.g. 'time'
     query: str    # the request so far; the answer completes it
     prompt: str   # the question that was asked
+    command: Optional[Command] = None  # already parsed except for this slot (the task)
 
     def describe(self):
         return f'awaiting {self.slot} for {self.intent.replace("create_", "")}'
@@ -173,8 +174,8 @@ class ConversationState:
     def confirm(self, command, prompt):
         self._set(AwaitingConfirmation(command, prompt), 'proposed')
 
-    def await_slot(self, intent, slot, query, prompt):
-        self._set(AwaitingSlot(intent, slot, query, prompt), 'asked')
+    def await_slot(self, intent, slot, query, prompt, command=None):
+        self._set(AwaitingSlot(intent, slot, query, prompt, command), 'asked')
 
     def clear(self, reason):
         if self._state is not IDLE:
