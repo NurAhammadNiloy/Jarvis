@@ -93,14 +93,22 @@ def test_time_answer_completes_the_alarm_instead_of_starting_a_new_request(jarvi
     jarvis.resolver.assert_not_called()
 
 
-def test_confirmed_proposal_executes_its_parsed_values_without_asking_again(jarvis):
+def test_model_proposal_runs_at_once_with_its_parsed_values(jarvis):
+    # Act first (22 Oct, 13:30): a clear proposal from conversation runs; "undo" reverses it.
     jarvis.resolver.return_value = ALARM_PROPOSAL
     jarvis.hear(AFTER_TWO_MINUTES_ON)  # idle: conversation, so the model proposes
-    assert jarvis.said() == ['Set an alarm for today at 10:38 AM?']  # what will run, not the transcript
-    jarvis.hear(YES)
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
-    assert jarvis.said()[-1] == 'Alarm set for today at 10:38 AM.'
+    assert jarvis.said() == ['Alarm set for today at 10:38 AM.']
+    jarvis.hear(YES)  # nothing left to confirm
+    assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
     assert jarvis.resolver.call_count == 1
+
+
+def confirm_alarm(jarvis):
+    """A pending confirmation, as Jarvis asks when only an alternative parses."""
+    from core.command_engine import understand_query
+    command = understand_query('set an alarm for 2 minutes from now', jarvis.assistant.services)
+    jarvis.assistant.state.confirm(command, 'Set an alarm for today at 10:38 AM?')
 
 
 # --- a clear reminder is not "unclear audio" --------------------------------------------
@@ -123,21 +131,18 @@ def test_spelling_variants_are_not_a_conflict_but_names_and_meridiem_are():
 # --- confirmation in any dialogue state -----------------------------------------------
 
 def propose_fresh(jarvis):
-    jarvis.resolver.side_effect = [ALARM_PROPOSAL]
-    jarvis.hear(AFTER_TWO_MINUTES_ON)
+    confirm_alarm(jarvis)
 
 
 def propose_during_repair(jarvis):
-    # The misheard turn starts a repair; the model asks, then proposes.
-    jarvis.resolver.side_effect = [{'reply': 'What do you need a definition for?', 'query': None},
-                                   ALARM_PROPOSAL]
+    # The misheard turn starts a repair (the model asks), then a confirmation is pending.
+    jarvis.resolver.side_effect = [{'reply': 'What do you need a definition for?', 'query': None}]
     jarvis.hear(DEFINITION)
-    jarvis.hear(AFTER_TWO_MINUTES_ON)
+    confirm_alarm(jarvis)
 
 
 def propose_then_unclear_answer(jarvis):
-    jarvis.resolver.side_effect = [ALARM_PROPOSAL]
-    jarvis.hear(AFTER_TWO_MINUTES_ON)
+    confirm_alarm(jarvis)
     jarvis.hear(heard('yes', 0.3))  # too weak to act on: asked again, still pending
 
 

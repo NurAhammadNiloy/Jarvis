@@ -136,18 +136,19 @@ def assistant_with_reminder(tmp_path):
     return assistant, reminders, resolver, output
 
 
-@pytest.mark.parametrize('command, answer', [(DELETE, YES), (DELETE, YES_DO_IT), (DELETE_POLITE, YES_PLEASE)])
-def test_logged_delete_is_confirmed_once_and_deletes(assistant_with_reminder, command, answer):
+@pytest.mark.parametrize('command', [DELETE, DELETE_POLITE])
+def test_logged_delete_acts_at_once_and_can_be_undone(assistant_with_reminder, command):
+    # Alternatives differ only in the name (Mom / Mam): the action is clear, so it runs.
     assistant, reminders, resolver, output = assistant_with_reminder
     assistant.process_recognition(ADDRESSED_DEFINITION)  # the misheard turn that started a repair
     assert resolver.call_count == 1
     assistant.process_recognition(command)
-    output.assert_called_with('Delete the call mom reminder?')
-    assert resolver.call_count == 1  # name variants are confirmed without ChatGPT
-    assistant.process_recognition(answer)
     output.assert_called_with('Deleted: call mom, today at 9:00 PM.')
     assert reminders.store.pending() == []
     assert resolver.call_count == 1
+    assistant.process_recognition(Recognition('undo', 0.9))
+    output.assert_called_with('Undone.')
+    assert [r.text for r in reminders.store.pending()] == ['call mom']
 
 
 def test_clear_command_during_a_repair_takes_the_fast_path(assistant_with_reminder):

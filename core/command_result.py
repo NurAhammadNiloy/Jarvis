@@ -1,6 +1,6 @@
 """Audio-independent values exchanged by the command boundary."""
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -34,3 +34,5 @@ class ActionResult:
     messages: Tuple[str, ...]
     succeeded: bool = True
     pending: bool = False  # the service asked a question (e.g. which reminder)
+    # Reverses this action ("undo", "no, that's wrong"); None when it cannot be undone.
+    undo: Optional[Callable[[], None]] = field(default=None, compare=False)

@@ -176,10 +176,9 @@ def assistant_fixture(clock=lambda: 0):
 def test_assistant_does_not_execute_weak_or_conflicting_actions():
     assistant, services, output, _, _ = assistant_fixture()
     assistant.process_recognition(Recognition('cancel all timers', 0.3))  # ignored: weak, no wake word
-    assistant.process_recognition(Recognition('cancel all timers', 0.6))  # asked to repeat
     assistant.process_recognition(Recognition('cancel all timers', 0.99, (Hypothesis("don't cancel all timers"),)))
-    services.timer_action.assert_not_called()
-    assert output.call_count == 2
+    services.timer_action.assert_not_called()  # alternatives disagree on a negation: never guessed
+    assert output.call_count == 1
 
 
 def test_unknown_confidence_requires_repeat_then_executes_once():
@@ -253,7 +252,7 @@ def test_recorded_wake_attempts_acknowledged_in_both_modes(passive, text, confid
 
 def test_wake_threshold_does_not_authorize_weak_inline_command():
     assistant, services, output, _, _ = assistant_fixture()
-    assistant.process_recognition(Recognition('Jarvis cancel all timers', 0.52), passive=True)
+    assistant.process_recognition(Recognition('Jarvis cancel all timers', 0.45), passive=True)
     services.timer_action.assert_not_called()
     output.assert_called_once()
 

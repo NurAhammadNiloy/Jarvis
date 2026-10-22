@@ -1,6 +1,7 @@
 """Voice orchestration around the unchanged speech-independent command boundary."""
 from dataclasses import replace
 import random
+import re
 import time
 
 from core.command_result import Command
@@ -51,6 +52,9 @@ class Assistant:
         self.answer_window, self.question_window = ACTIVE_WINDOW_SECONDS, QUESTION_WINDOW_SECONDS
         self.last_active_time = clock()
         self._recognition_failure_prompted = False
+        from config.settings import UNDO_WINDOW_SECONDS
+        self.undo_window = UNDO_WINDOW_SECONDS
+        self._last_action = None  # (undo function or None, when, intent) of the last change
 
     def process_recognition(self, recognition, passive=False):
         """Only final, accepted transcripts may reach execute_query."""
@@ -144,6 +148,8 @@ class Assistant:
             # more likely a TV or another person than you (nothing is pending here).
             record('voice_decision', decision='ignore', reason='weak_without_wake_word', text=text)
             return False
+        if _UNDO.match(text) and not recognition.error:
+            return self._undo_last(text)
         decision = self.gate.assess(recognition, text=text)
         if (self.dialogue is not None and decision.kind == 'clarify' and decision.reason in ('wording', 'meaning')
                 and route(text).intent == 'chat'):
@@ -152,6 +158,11 @@ class Assistant:
             # cautious) cannot execute anything and the model sees the alternatives, so it is
             # answered normally instead of being labelled "unclear audio".
             decision = VoiceDecision('accept', text=text)
+        if decision.kind != 'stop' and not recognition.error and not recognition.truncated and text and \
+                route(text).intent != 'chat':
+            plan = self._plan(recognition, text, decision)
+            if plan is not None:
+                return self._carry_out(plan, recognition, text)
         if self.dialogue is not None and decision.kind != 'stop' and not recognition.error and not recognition.truncated and text:
             # A clear command takes the fast path; only conversation, requests
             # the parser cannot understand and unclear audio go to the dialogue.
@@ -309,6 +320,124 @@ class Assistant:
         self.state.confirm(command, prompt)
         return prompt
 
+    # --- act first, undo instead of confirm ---------------------------------------
+
+    def _plan(self, recognition, text, decision):
+        """('act', command) when the parsed action is clear, ('ask', [commands]) when the
+        recognition alternatives disagree on the action itself, None for the old path
+        (negations, unknown confidence, unclear audio, nothing parseable)."""
+        if decision.kind == 'clarify' and decision.reason not in ('wording', 'meaning', 'low_confidence'):
+            return None  # "I won't act on that", "which timer?", repeat to confirm, ...
+        if decision.kind not in ('accept', 'clarify'):
+            return None
+        if recognition.confidence is not None and recognition.confidence < 0.5:
+            return None
+        primary = self._understand(text)
+        others = []
+        for alternative in recognition.alternatives:
+            if alternative.confidence is not None and alternative.confidence < 0.5:
+                continue
+            alt_text = _addressed(alternative.text)
+            if set(words(alt_text)) & _NEGATIONS != set(words(text)) & _NEGATIONS:
+                return None  # "cancel" vs "don't cancel": never guess
+            if route(alt_text).intent != 'chat':
+                others.append(self._understand(alt_text))
+        if self._complete(primary):
+            differing = [c for c in others if self._complete(c) and _signature(c) != _signature(primary)]
+            if differing:
+                return ('ask', [primary, differing[0]])
+            existing = primary.intent == 'start_timer' and self._running_timer_named(
+                primary, [text] + [a.text for a in recognition.alternatives])
+            if existing:
+                return ('ask', [_add_time(primary, existing), primary])
+            return ('act', primary)
+        candidates = []
+        for command in others:
+            if self._complete(command) and all(_signature(command) != _signature(c) for c in candidates):
+                candidates.append(command)
+        if candidates:
+            return ('ask', candidates[:2])
+        return None
+
+    def _complete(self, command):
+        if not self._understood(command) or command.intent == 'chat':
+            return False
+        if command.intent in ('start_timer', 'add_timer_time'):
+            return bool((command.arguments.get('duration') or (None,))[0])
+        return True
+
+    def _running_timer_named(self, command, texts):
+        """An existing timer this "start a timer" request names ("... to Pasta timer"),
+        when it could just as well mean "add time to it"."""
+        try:
+            timers = list(self.services.timers.active_timers())
+        except Exception:
+            return None
+        spoken = {w for text in texts for w in words(text)} | set(words(command.arguments.get('label') or ''))
+        for timer in timers:
+            label_words = set(words(timer.label or ''))
+            if label_words and any(_similar(w, s) for w in label_words for s in spoken):
+                return timer.label
+        return None
+
+    def _carry_out(self, plan, recognition, text):
+        kind, value = plan
+        self.active_conversation = True
+        self.last_active_time = self.clock()
+        self.speech.stop()
+        if self.dialogue is not None:
+            self.dialogue.clear()
+            self.dialogue.observe('user', text)
+        self.state.clear('superseded')
+        if kind == 'act':
+            record('voice_decision', decision='accept', text=text, reason='act first',
+                   playback_id=recognition.playback_id)
+            self._run(value)
+            return True
+        if len(value) == 1:
+            prompt = self._describe(value[0]) + '?'
+            self.state.confirm(value[0], prompt)
+        else:
+            prompt = self._either_or(value)
+            self.state.choose(value, [_cues(c, self._describe(c), value) for c in value], prompt)
+        record('voice_decision', decision='clarify', text=text, reason='alternatives disagree', prompt=prompt)
+        self.output(prompt)
+        return True
+
+    def _either_or(self, options):
+        first, second = options
+        if {first.intent, second.intent} == {'add_timer_time', 'start_timer'}:
+            add = first if first.intent == 'add_timer_time' else second
+            seconds = add.arguments['duration'][0]
+            from core.command_description import duration_words
+            return (f"Add {duration_words(seconds)} to {add.arguments.get('label', 'the timer').lower()}, "
+                    f"or a new {duration_words(seconds, True)} timer?")
+        second_text = self._describe(second)
+        return f"{self._describe(first)}, or {second_text[:1].lower() + second_text[1:]}?"
+
+    def _undo_last(self, text):
+        record('voice_decision', decision='undo', text=text)
+        self.active_conversation = True
+        self.last_active_time = self.clock()
+        self.speech.stop()
+        last, self._last_action = self._last_action, None
+        if last is None or self.clock() - last[1] > self.undo_window:
+            self.output("There's nothing to undo.")
+            return True
+        undo, _, intent = last
+        if undo is None:
+            self.output("Sorry, I can't undo that.")
+            return True
+        try:
+            undo()
+        except Exception as exc:
+            record('undo_failed', intent=intent, error=type(exc).__name__)
+            self.output("Sorry, I couldn't undo that.")
+            return True
+        record('undone', intent=intent)
+        self.output('Undone.')
+        return True
+
     def _describe(self, command):
         """What will actually run, from the parsed command (not the transcript)."""
         from core.command_description import describe_command
@@ -321,14 +450,6 @@ class Assistant:
     def _dialogue_turn(self, recognition, text, decision, intent):
         started = time.monotonic()
         turn = None
-        if decision.reason == 'wording' and intent != 'chat':
-            # Alternatives differ only in wording ('call Mom' / 'call Mam'):
-            # confirm the user's own words; no model call needed.
-            trigger = 'similar alternatives'
-            try:
-                turn = self.dialogue.propose(text)
-            except ValueError:
-                turn = None
         if turn is None:
             trigger = 'unclear audio' if decision.kind == 'clarify' else 'conversation'
             pending = getattr(self.state.current, 'command', None)
@@ -336,14 +457,16 @@ class Assistant:
                                       reason=decision.prompt if decision.kind == 'clarify' else 'conversation')
         dialogue_ms = round((time.monotonic() - started) * 1000)
         command = self._understand(turn.proposal) if turn.proposal else None
-        if command is not None and command.intent in READ_ONLY_INTENTS and self._understood(command):
-            # Looking something up changes nothing, so no second confirmation.
+        if (command is not None and self._understood(command) and not self._time_question(command)
+                and (decision.kind != 'clarify' or command.intent in READ_ONLY_INTENTS)):
+            # Act first: the model understood a clear request; "undo" reverses it. After
+            # unclear audio only look-ups run directly; anything else is asked first.
             self.active_conversation = True
             self.last_active_time = self.clock()
             self.speech.stop()
             record('dialogue_turn', reply='', proposal=turn.proposal, duration_ms=dialogue_ms,
-                   model_called=self.dialogue.model_called, trigger=trigger, ran_read_only=True)
-            self.state.clear('read-only proposal')
+                   model_called=self.dialogue.model_called, trigger=trigger, ran_proposal=True)
+            self.state.clear('proposal run')
             self._run(command)
             return True
         if turn.proposal:
@@ -370,6 +493,11 @@ class Assistant:
         result = run()
         record('command_result', status=result.status, intent=result.intent, messages=list(result.messages),
                pending_action=result.pending_action, duration_ms=round((time.monotonic() - started) * 1000))
+        undo = result.data.get('undo') if hasattr(result.data, 'get') else None
+        if undo is not None:
+            self._last_action = (undo, self.clock(), result.intent)
+        elif result.status == 'handled' and result.intent in _NOT_UNDOABLE:
+            self._last_action = (None, self.clock(), result.intent)
         if result.pending_action == 'reminder_task':
             self.state.await_slot(result.intent, 'task', query, result.messages[0],
                                   Command(result.intent, query, result.data['args']))
@@ -404,3 +532,57 @@ class Assistant:
         self.speech.stop()
         self.listener.close()
         self.speech.close()
+
+
+# --- helpers for acting first --------------------------------------------------------
+
+_UNDO = re.compile(
+    r"^\W*(?:no\W+)?(?:undo(?:\s+(?:that|it|this))?|that['’]?s\s+(?:wrong|not\s+right)|that\s+was\s+wrong"
+    r"|cancel\s+that|take\s+(?:that|it)\s+back|revert(?:\s+(?:that|it))?)(?:\s+please)?\W*$", re.IGNORECASE)
+_NEGATIONS = {'not', 'no', 'never', "don't", 'don’t', "can't", 'cannot', "won't", "didn't"}
+# Opening a page or playing a video cannot be taken back.
+_NOT_UNDOABLE = {'youtube', 'google'}
+_WAKE_LIKE = {'jarvis', 'yarvis', 'jervis', 'javis'}
+
+
+def _addressed(text):
+    """The words after a (misheard) wake word: 'Yarvis pause the timer' -> 'pause the timer'."""
+    addressed = strip_wake_word(text)
+    if addressed is not None:
+        return addressed
+    tokens = text.split()
+    return ' '.join(tokens[1:]) if tokens and tokens[0].lower().strip(',.') in _WAKE_LIKE else text
+
+
+def _signature(command):
+    """What the action is: the intent plus the amount or time that matters."""
+    args = command.arguments
+    if command.intent in ('start_timer', 'add_timer_time'):
+        return command.intent, (args.get('duration') or (None,))[0]
+    if command.intent in ('create_reminder', 'alarm') and args.get('operation', 'create') == 'create':
+        due = args.get('due')
+        return command.intent, due.replace(second=0, microsecond=0) if due else None, args.get('recurrence')
+    return (command.intent,)
+
+
+def _similar(a, b):
+    from difflib import SequenceMatcher
+    return a == b or len(a) > 3 and len(b) > 3 and SequenceMatcher(None, a, b).ratio() >= 0.8
+
+
+def _add_time(start, label):
+    """The "add time to <label>" reading of a "start a timer" request."""
+    args = dict(start.arguments, label=label, action='add_time')
+    return Command('add_timer_time', f"add {start.query} to {label} timer", args)
+
+
+_CUE_WORDS = {'add_timer_time': {'add', 'more', 'extend', 'existing', 'it', 'that', 'same'},
+              'start_timer': {'new', 'another', 'separate', 'start', 'fresh', 'second'}}
+_COMMON = {'the', 'a', 'an', 'to', 'for', 'or', 'timer', 'of', 'set', 'your'}
+
+
+def _cues(command, description, options):
+    """Words in an answer that pick this option: its own words minus the shared ones."""
+    mine = set(words(description)) | _CUE_WORDS.get(command.intent, set())
+    shared = set.intersection(*(set(words(o.query)) for o in options)) | _COMMON
+    return frozenset(mine - shared)

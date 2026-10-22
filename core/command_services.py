@@ -110,4 +110,26 @@ class CommandServices:
             succeeded = getattr(manager, action + "_timer")(**kwargs)
         else:
             succeeded = manager.create_timer(query, **kwargs) is not None
-        return ActionResult(tuple(messages), bool(succeeded))
+        undo = self._timer_undo(action, info, manager) if succeeded else None
+        return ActionResult(tuple(messages), bool(succeeded), undo=undo)
+
+    @staticmethod
+    def _timer_undo(action, info, manager):
+        """How to reverse a timer action, from what the manager says it changed."""
+        affected = list(getattr(manager, 'last_affected', None) or [])
+        if not affected:
+            return None
+        quiet = lambda message: None  # noqa: E731 - the assistant says "Undone."
+        timer = affected[0][0]
+        if action == 'set':
+            return lambda: manager.cancel_timer(timer_id=timer.id, respond=quiet)
+        if action == 'pause':
+            return lambda: manager.resume_timer(timer_id=timer.id, respond=quiet)
+        if action == 'resume':
+            return lambda: manager.pause_timer(timer_id=timer.id, respond=quiet)
+        if action == 'add_time':
+            seconds = info['duration'][0]
+            return lambda: manager.add_time(-seconds, timer_id=timer.id, respond=quiet)
+        if action in ('cancel', 'cancel_all'):
+            return lambda: manager.restore_timers(affected)
+        return None

@@ -76,7 +76,7 @@ boundary. Clock and response choice can be fixed for deterministic tests.
             return reply(*action.messages, status="pending", pending_action="choose_reminder",
                          legacy_handled=True)
         return reply(*action.messages, status="handled" if action.succeeded else "error",
-                     legacy_handled=True)
+                     legacy_handled=True, data={"undo": action.undo} if action.undo else {})
 
     if intent == "alarm" and args.get("operation") == "delete":
         return action_reply(services.delete_reminder(None, args["when_text"], kind="alarm"))

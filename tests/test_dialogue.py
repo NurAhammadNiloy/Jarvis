@@ -93,26 +93,41 @@ def test_assistant_routes_confirmed_repair_through_existing_boundary():
     assistant = Assistant(Mock(), speech, services, output, clock=lambda: 0,
         dialogue=Dialogue(resolver, clock=lambda: 0))
     assistant.process_recognition(Recognition('set a reminder for me', .9))  # nothing to parse: the model asks
-    assistant.process_recognition(Recognition('Anne tomorrow at 9 am', .9))
     services.reminder.assert_not_called()
-    assistant.process_recognition(Recognition('yes', .95))
+    assistant.process_recognition(Recognition('Anne tomorrow at 9 am', .9))  # the proposal runs (act first)
     services.reminder.assert_called_once_with(asdict(parse_reminder('remind me to call Anne tomorrow at 9 am', NOW)))
     assistant.process_recognition(Recognition('yes', .95))
     services.reminder.assert_called_once()
     assert any(h['text'] == 'Reminder set.' for h in assistant.dialogue.history)
 
 
-@pytest.mark.parametrize('query, method, readback', [
-    ('delete my dentist reminder', 'delete_reminder', 'Delete the dentist reminder?'),
-    ('snooze that reminder', 'snooze_reminder', 'Snooze the reminder for 10 minutes?'),
-    ('set an alarm for 7am', 'reminder', 'Set an alarm for tomorrow at 7 AM?')])
-def test_reminder_and_alarm_proposals_need_spoken_confirmation(query, method, readback):
+PROPOSALS = [('delete my dentist reminder', 'delete_reminder', 'Delete the dentist reminder?'),
+             ('snooze that reminder', 'snooze_reminder', 'Snooze the reminder for 10 minutes?'),
+             ('set an alarm for 7am', 'reminder', 'Set an alarm for tomorrow at 7 AM?')]
+
+
+def proposing(query):
+    return Dialogue(Mock(return_value={'reply': 'Ready', 'query': query}), clock=lambda: 0)
+
+
+@pytest.mark.parametrize('query, method, readback', PROPOSALS)
+def test_clear_conversation_proposals_run_at_once(query, method, readback):
     services = mock_services()
     getattr(services, method).return_value = ActionResult(('Done.',))
     output = Mock()
-    assistant = Assistant(Mock(), Mock(), services, output, clock=lambda: 0,
-        dialogue=Dialogue(Mock(return_value={'reply': 'Ready', 'query': query}), clock=lambda: 0))
-    assistant.process_recognition(Recognition('something', .9))
+    assistant = Assistant(Mock(), Mock(), services, output, clock=lambda: 0, dialogue=proposing(query))
+    assistant.process_recognition(Recognition('something about that', .9))
+    getattr(services, method).assert_called_once()
+    output.assert_called_with('Done.')
+
+
+@pytest.mark.parametrize('query, method, readback', PROPOSALS)
+def test_proposals_from_unclear_audio_are_read_back_first(query, method, readback):
+    services = mock_services()
+    getattr(services, method).return_value = ActionResult(('Done.',))
+    output = Mock()
+    assistant = Assistant(Mock(), Mock(), services, output, clock=lambda: 0, dialogue=proposing(query))
+    assistant.process_recognition(Recognition('Jarvis something', .3))   # unclear audio
     output.assert_called_with(readback)
     getattr(services, method).assert_not_called()
     assistant.process_recognition(Recognition('yes', .95))

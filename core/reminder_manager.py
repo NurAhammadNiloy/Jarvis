@@ -187,11 +187,17 @@ class ReminderService:
                                      created_at=self.now())
         self._changed()
         reminder = self.store.get(reminder_id)
+        undo = lambda: self._set_status(reminder_id, 'cancelled')  # noqa: E731
         when = describe(reminder, self.now())
         when = when[3:] if when.startswith('on ') else when  # "set for Sunday", not "for on Sunday"
         if reminder.kind == 'alarm':
-            return ActionResult((f"Alarm set for {when}." + (f" {reminder.text}." if reminder.text else ''),))
-        return ActionResult((f"Reminder set for {when}: {reminder.text}.",))
+            return ActionResult((f"Alarm set for {when}." + (f" {reminder.text}." if reminder.text else ''),),
+                                undo=undo)
+        return ActionResult((f"Reminder set for {when}: {reminder.text}.",), undo=undo)
+
+    def _set_status(self, reminder_id, status):
+        self.store.set_status(reminder_id, status)
+        self._changed()
 
     def complete(self, reminder_id):
         self.store.set_status(reminder_id, 'done')
@@ -229,9 +235,9 @@ class ReminderService:
         if len(matches) > 1:
             return self._which(matches, noun, 'delete')
         reminder = matches[0]
-        self.store.set_status(reminder.id, 'cancelled')
-        self._changed()
-        return ActionResult((f"Deleted: {label(reminder)}, {describe(reminder, self.now())}.",))
+        self._set_status(reminder.id, 'cancelled')  # a soft delete, so it can be undone
+        return ActionResult((f"Deleted: {label(reminder)}, {describe(reminder, self.now())}.",),
+                            undo=lambda: self._set_status(reminder.id, reminder.status))
 
     def snooze(self, target=None, minutes=10, when_text=''):
         now = self.now()
@@ -249,13 +255,18 @@ class ReminderService:
         if reminder.recurrence != 'none':
             # Snoozing one occurrence must not move the whole series.
             due = _plus(now, delta)
-            self.store.add(reminder.text, due, 'none', None, reminder.kind, created_at=now)
+            copy_id = self.store.add(reminder.text, due, 'none', None, reminder.kind, created_at=now)
+            undo = lambda: self._set_status(copy_id, 'cancelled')  # noqa: E731
         else:
             due = _plus(reminder.due if reminder.status == 'pending' and reminder.due > now else now, delta)
             self.store.set_due(reminder.id, due, 'pending')
+
+            def undo():
+                self.store.set_due(reminder.id, reminder.due, reminder.status)
+                self._changed()
         self._changed()
         return ActionResult((f"Snoozed for {minutes} minute{'s' if minutes != 1 else ''}. "
-                             f"I'll remind you {describe_when(due, now)}.",))
+                             f"I'll remind you {describe_when(due, now)}.",), undo=undo)
 
     def _matches(self, target, when_text='', kind=None, include_fired=False):
         now = self.now()

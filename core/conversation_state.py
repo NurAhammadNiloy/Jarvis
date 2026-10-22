@@ -129,6 +129,33 @@ class AwaitingConfirmation:
 
 
 @dataclass(frozen=True)
+class AwaitingChoice:
+    """An either/or question, asked only when the recognition alternatives disagree
+    on the action itself: "Add 5 minutes to pasta, or a new 5-minute timer?"."""
+    options: tuple   # two parsed Commands
+    cues: tuple      # per option, the words that pick it ("add", "new", "pasta", ...)
+    prompt: str
+
+    def describe(self):
+        return 'awaiting choice: ' + ' / '.join(option.query for option in self.options)
+
+
+_FIRST, _SECOND = {'first', 'former'}, {'second', 'latter', 'other'}
+
+
+def pick(choice, text):
+    """Index of the option an answer picks, or None."""
+    tokens = set(words(text))
+    if tokens & _FIRST and not tokens & _SECOND:
+        return 0
+    if tokens & _SECOND and not tokens & _FIRST:
+        return 1
+    scores = [len(tokens & cues) for cues in choice.cues]
+    best = max(scores)
+    return scores.index(best) if best and scores.count(best) == 1 else None
+
+
+@dataclass(frozen=True)
 class AwaitingSlot:
     intent: str   # e.g. 'alarm'
     slot: str     # e.g. 'time'
@@ -178,6 +205,9 @@ class ConversationState:
     def confirm(self, command, prompt):
         self._set(AwaitingConfirmation(command, prompt), 'proposed')
 
+    def choose(self, options, cues, prompt):
+        self._set(AwaitingChoice(tuple(options), tuple(cues), prompt), 'asked either/or')
+
     def await_slot(self, intent, slot, query, prompt, command=None):
         self._set(AwaitingSlot(intent, slot, query, prompt, command), 'asked')
 
@@ -199,6 +229,8 @@ class ConversationState:
             return None
         if isinstance(state, AwaitingSlot):
             return Answer('fill', text=f'{state.query} {text}')
+        if isinstance(state, AwaitingChoice):
+            return self._check_choice(state, recognition, text)
         answer = strip_echoed_prompt(text, state.prompt, REPROMPT, _OLD_PROMPT)
         kind = answer_kind(answer)
         if kind in ('yes', 'no') and not answer_reliable(recognition, kind, state.prompt, REPROMPT, _OLD_PROMPT):
@@ -210,3 +242,17 @@ class ConversationState:
             self.clear('declined')
             return Answer('reply', text="Okay, I won't do that.")
         return None  # something else: a correction or a new request
+
+    def _check_choice(self, state, recognition, text):
+        answer = strip_echoed_prompt(text, state.prompt)
+        index = pick(state, answer)
+        if index is not None and (recognition.confidence is None or recognition.confidence >= 0.5):
+            self.clear('chosen')
+            return Answer('execute', command=state.options[index])
+        kind = answer_kind(answer)
+        if kind == 'no' and answer_reliable(recognition, 'no', state.prompt):
+            self.clear('declined')
+            return Answer('reply', text="Okay, I'll leave it.")
+        if kind == 'yes' or index is None and len(words(answer)) <= 2:
+            return Answer('reply', text='Sorry, which one? ' + state.prompt)
+        return None  # a new request

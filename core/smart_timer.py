@@ -114,7 +114,9 @@ class SmartTimerManager:
         self.pomodoro_break_duration = 5 * 60  # 5 minutes
         self.pomodoro_long_break = 15 * 60     # 15 minutes
         self.pomodoro_count = 0
-        
+        # What the last operation changed, for undo: [(timer, remaining seconds, state before)].
+        self.last_affected = []
+
         # Load history
         self._load_history()
     
@@ -320,6 +322,13 @@ class SmartTimerManager:
             'can', 'could', 'would', 'will', 'you', 'me', 'i', 'jarvis'
         ]
         
+        # An explicit name wins: "certain timer for 25 minutes called pasta" is Pasta.
+        match = re.search(r'\b(?:called|named)\s+(?:my\s+|the\s+)?(.+?)$', text_lower)
+        if match:
+            label_words = [w for w in match.group(1).split() if w not in duration_words and not w.isdigit()]
+            if label_words:
+                return ' '.join(label_words).title()
+
         # Pattern: "set a {label} timer for {duration}"
         match = re.search(r'(?:set|start|create)\s+(?:a\s+)?(.+?)\s+timer\s+(?:for|of)', text_lower)
         if match:
@@ -456,7 +465,8 @@ class SmartTimerManager:
         
         # Start timer thread
         self._start_timer_thread(timer)
-        
+        self.last_affected = [(timer, timer.remaining_seconds, TimerState.RUNNING)]
+                
         # Announce
         self._announce_timer_set(timer, duration_str, respond=respond)
         
@@ -621,6 +631,7 @@ class SmartTimerManager:
             respond("That timer is not currently running.")
             return False
         
+        self.last_affected = [(timer, timer.remaining_seconds, TimerState.RUNNING)]
         timer.state = TimerState.PAUSED
         timer.pause_time = datetime.now()
         timer.elapsed_before_pause += (timer.pause_time - timer.started_at).total_seconds()
@@ -660,6 +671,7 @@ class SmartTimerManager:
             respond("That timer is not paused.")
             return False
         
+        self.last_affected = [(timer, timer.remaining_seconds, TimerState.PAUSED)]
         timer.state = TimerState.RUNNING
         timer.started_at = datetime.now()
         timer._stop_event.clear()
@@ -696,9 +708,10 @@ class SmartTimerManager:
                     respond("There are no active timers.")
                     return False
         
+        self.last_affected = [(timer, timer.remaining_seconds, timer.state)]
         timer.state = TimerState.CANCELLED
         timer._stop_event.set()
-        
+
         with self._lock:
             if timer.id in self.timers:
                 del self.timers[timer.id]
@@ -714,6 +727,7 @@ class SmartTimerManager:
         """Cancel all active timers."""
         with self._lock:
             count = len(self.timers)
+            self.last_affected = [(t, t.remaining_seconds, t.state) for t in self.timers.values()]
             for timer in self.timers.values():
                 timer.state = TimerState.CANCELLED
                 timer._stop_event.set()
@@ -811,6 +825,7 @@ class SmartTimerManager:
                     respond("I couldn't find that timer.")
                     return False
         
+        self.last_affected = [(timer, timer.remaining_seconds, timer.state)]
         timer.duration_seconds += seconds
         added_str = self._format_duration(seconds)
         
@@ -821,6 +836,25 @@ class SmartTimerManager:
         
         return True
     
+    def restore_timers(self, snapshots):
+        """Undo a cancel: put timers back with the time they had left."""
+        for old, remaining, state in snapshots:
+            timer = SmartTimer(id=old.id, duration_seconds=old.duration_seconds, label=old.label,
+                               alert_style=old.alert_style, announce_intervals=old.announce_intervals,
+                               chain_next=old.chain_next, category=old.category, started_at=datetime.now(),
+                               elapsed_before_pause=old.duration_seconds - remaining,
+                               state=TimerState.PAUSED if state == TimerState.PAUSED else TimerState.RUNNING)
+            timer._announced_milestones = set(old._announced_milestones)
+            with self._lock:
+                self.timers[timer.id] = timer
+            if timer.state == TimerState.RUNNING:
+                self._start_timer_thread(timer)
+
+    def active_timers(self):
+        """Running or paused timers, for "which timer?" answers."""
+        with self._lock:
+            return list(self.timers.values())
+
     def start_pomodoro(self, work_duration: Optional[int] = None, break_duration: Optional[int] = None, respond=synthesize_speech):
         """Start a Pomodoro work session."""
         work = work_duration or self.pomodoro_work_duration

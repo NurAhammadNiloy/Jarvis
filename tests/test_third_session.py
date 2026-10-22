@@ -329,10 +329,10 @@ def test_yes_to_are_you_asking_about_reminders_lists_them_without_a_second_confi
     assert jarvis.resolver.call_args.args[0]['history'][-1]['text'] == 'yes'
 
 
-def test_changing_proposals_still_need_confirmation(jarvis):
+def test_changing_proposals_run_and_report_the_result(jarvis):
     jarvis.resolver.return_value = {'reply': 'Ok.', 'query': 'delete my dentist reminder'}
     jarvis.hear(heard('Jarvis get rid of the dentist thing', 0.9))
-    assert jarvis.said()[-1] == 'Delete the dentist reminder?'
+    assert jarvis.said()[-1] == "I couldn't find a reminder about dentist."
 
 
 # --- "for <number> <unit>" in reminders (session 5472c258, 12:21) ---------------------

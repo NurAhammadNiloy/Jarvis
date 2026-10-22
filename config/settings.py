@@ -21,3 +21,6 @@ ACTIVE_WINDOW_SECONDS = 10
 
 # The same, when Jarvis's last reply ended with a question (you may need to think).
 QUESTION_WINDOW_SECONDS = 20
+
+# "undo" / "no, that's wrong" / "cancel that" reverses the last action for this long.
+UNDO_WINDOW_SECONDS = 60
