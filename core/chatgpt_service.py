@@ -15,6 +15,8 @@ def resolve_dialogue(context):
     context['answer_length'] is 'long' when the user asked for detail."""
     import json
     long_answer = context.get('answer_length') == 'long'
+    from core.intent_classifier import command_names
+    commands = ', '.join(command_names())
     response = openai.ChatCompletion.create(
         model='gpt-4o', temperature=0, max_tokens=450 if long_answer else 250,
         request_timeout=NETWORK_TIMEOUT_SECONDS if long_answer else 8,
@@ -30,9 +32,11 @@ def resolve_dialogue(context):
             'authorization. You cannot execute anything. Never claim an action succeeded. '
             'Return ONLY JSON with exactly reply (string) and query (string or null). '
             'For conversation or a missing/uncertain detail use query null. For a complete requested '
-            'action, query is a standalone plain-text command for confirmation. Supported actions '
-            'are reminders (create, delete, snooze), alarms, timers, weather, date/time, YouTube and opening Google.  '
-            'Do not propose unsupported actions. For a reminder preserve task, time and recurrence. '
+            'action, query is a standalone plain-text command for confirmation. Jarvis can run exactly '
+            'these commands: ' + commands + '. Never say you cannot do something on this list (for example '
+            '"I cannot check reminders"): put it in query, phrased like the user would say it, e.g. '
+            '"do I have any reminders". A yes to your own question about one of them means: propose it. '
+            'Do not propose actions that are not on the list. For a reminder preserve task, time and recurrence. '
             'If the user changes topic, answer that topic; do not force the pending request. '
             'Never ask in reply whether to perform an action; put the action in query and the system '
             'asks for confirmation. Phrase query as the user would say it, using their words, e.g. '

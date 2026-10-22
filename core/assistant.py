@@ -9,7 +9,7 @@ from core.command_services import CommandServices
 from core.conversation_state import ConversationState, stop_threshold
 from core.voice_policy import ConfidenceGate, stop_heard, strip_wake_word, words
 from core.conversation_log import record
-from core.intent_classifier import route
+from core.intent_classifier import READ_ONLY_INTENTS, route
 
 
 class Assistant:
@@ -279,6 +279,17 @@ class Assistant:
             turn = self.dialogue.turn(replace(recognition, text=text), pending=pending.query if pending else None,
                                       reason=decision.prompt if decision.kind == 'clarify' else 'conversation')
         dialogue_ms = round((time.monotonic() - started) * 1000)
+        command = self._understand(turn.proposal) if turn.proposal else None
+        if command is not None and command.intent in READ_ONLY_INTENTS and self._understood(command):
+            # Looking something up changes nothing, so no second confirmation.
+            self.active_conversation = True
+            self.last_active_time = self.clock()
+            self.speech.stop()
+            record('dialogue_turn', reply='', proposal=turn.proposal, duration_ms=dialogue_ms,
+                   model_called=self.dialogue.model_called, trigger=trigger, ran_read_only=True)
+            self.state.clear('read-only proposal')
+            self._run(command)
+            return True
         reply = ((self._propose(turn.proposal) if turn.proposal else None) or turn.reply or
                  "I couldn't work out that request. Could you say it again?")
         self.active_conversation = True

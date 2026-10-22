@@ -9,6 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
+import json
+from unittest.mock import patch
+
 import pytest
 
 from core import conversation_log
@@ -293,3 +296,40 @@ def test_unrecognized_audio_after_an_echo_gets_an_outcome_line():
     assert lines == ['You (ignored: Jarvis speaking (speakers mode)): "(unrecognized)"  conf - | stt 0.0s',
                      'You (ignored: nothing clear after Jarvis stopped (speakers mode)): "(unrecognized)"  conf -'
                      ' | stt 0.0s']
+
+
+# --- ChatGPT knows Jarvis's commands (session 5472c258, 12:20) -------------------------
+
+NO_THEY_HAVE = heard('no they have any reminder', 0.78612196, ('now they have any reminder', 0.77071142),
+                     ('know they have any reminder', 0.78612196), ('no they have any reminders', 0.60823381))
+YES_REMINDERS = heard('yes', 0.57714069, ('yesss', 0.57714069), ('yessss', 0.57714069), ('yess', 0.57714069))
+
+
+def test_prompt_lists_the_router_commands_and_forbids_saying_they_are_impossible():
+    from core import chatgpt_service
+    from core.intent_classifier import command_names
+    reply = {'choices': [{'message': {'content': json.dumps({'reply': 'Fine.', 'query': None})}}]}
+    with patch.object(chatgpt_service.openai.ChatCompletion, 'create', return_value=reply) as create:
+        chatgpt_service.resolve_dialogue({'history': []})
+    prompt = create.call_args.kwargs['messages'][0]['content']
+    assert all(name in prompt for name in command_names()) and 'list reminders' in prompt
+    assert 'Never say you cannot do something on this list' in prompt
+
+
+def test_yes_to_are_you_asking_about_reminders_lists_them_without_a_second_confirmation(jarvis):
+    jarvis.resolver.side_effect = [
+        {'reply': 'I\'m not sure what you mean. Are you asking if there are any reminders set?', 'query': None},
+        {'reply': 'Checking.', 'query': 'do I have any reminders'},
+    ]
+    jarvis.hear(NO_THEY_HAVE)
+    assert jarvis.said()[-1].endswith('Are you asking if there are any reminders set?')
+    jarvis.hear(YES_REMINDERS)
+    assert jarvis.said()[-1] == 'You have no reminders.'
+    assert 'Shall I' not in ' '.join(jarvis.said())
+    assert jarvis.resolver.call_args.args[0]['history'][-1]['text'] == 'yes'
+
+
+def test_changing_proposals_still_need_confirmation(jarvis):
+    jarvis.resolver.return_value = {'reply': 'Ok.', 'query': 'delete my dentist reminder'}
+    jarvis.hear(heard('Jarvis get rid of the dentist thing', 0.9))
+    assert jarvis.said()[-1] == 'I have: delete my dentist reminder. Shall I do that?'

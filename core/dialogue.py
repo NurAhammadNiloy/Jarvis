@@ -9,7 +9,7 @@ import time
 
 from core.conversation_state import answer_kind
 from core.voice_policy import ConfidenceGate, Recognition
-from core.intent_classifier import FAMILIES, route
+from core.intent_classifier import COMMAND_INTENTS, route
 
 
 # Asking for detail allows a longer answer (up to ~6 sentences); otherwise short.
@@ -62,9 +62,7 @@ class Dialogue:
 
     def _validate(self, query):
         """A proposal must be a supported, non-negated command."""
-        intent = route(query).intent
-        if FAMILIES.get(intent, intent) not in {'reminder', 'alarm', 'timer', 'weather', 'forecast',
-                                                'time', 'date', 'youtube', 'google'}:
+        if route(query).intent not in COMMAND_INTENTS:
             raise ValueError('Unsupported proposal')
         if ConfidenceGate(self.clock).assess(Recognition(query, 1.0)).kind != 'accept':
             raise ValueError('Unsafe proposal')

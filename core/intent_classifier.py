@@ -87,6 +87,20 @@ FAMILIES = {
 }
 
 
+# Conversation, not commands: the router answers these with chat or a fixed reply.
+_NOT_COMMANDS = {'thank', 'what you are doing'}
+# Every intent the router knows is a command Jarvis can run, and so can be proposed
+# by the dialogue; derived from RULES so the two never drift apart.
+COMMAND_INTENTS = tuple(intent for intent, _ in RULES if intent not in _NOT_COMMANDS)
+# Commands that only look something up; a proposal for one runs without "Shall I do that?".
+READ_ONLY_INTENTS = frozenset({'list_reminders', 'timer_status', 'weather', 'forecast', 'time', 'date'})
+
+
+def command_names():
+    """Spoken names of the supported commands, e.g. 'list reminders', for prompts."""
+    return [intent.replace('_', ' ') for intent in COMMAND_INTENTS]
+
+
 @dataclass(frozen=True)
 class Route:
     intent: str
