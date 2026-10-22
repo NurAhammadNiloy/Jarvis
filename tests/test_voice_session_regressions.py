@@ -273,3 +273,13 @@ def test_no_barge_in_recognition_while_jarvis_is_silent():
     finally:
         listener.close()
     assert True not in calls
+
+
+def test_a_reply_waits_at_most_1_5_seconds_for_a_busy_microphone():
+    # 193aa5d4: replies were held 2.1 s and 3.0 s (8.6 s over five replies) because the
+    # detector stayed open on noise.
+    output = SpeechController(lambda text: PCMClip(b'\0' * 960, 24000), Mock())
+    try:
+        assert output.max_input_wait == 1.5
+    finally:
+        output.close()

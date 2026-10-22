@@ -120,7 +120,7 @@ class SoundDevicePlayer:
 
 
 class SpeechController:
-    def __init__(self, synthesizer, player, max_pending=16, max_input_wait=3.0):
+    def __init__(self, synthesizer, player, max_pending=16, max_input_wait=1.5):
         self.synthesizer = synthesizer
         self.player = player
         self.max_pending = max_pending
