@@ -16,7 +16,7 @@ SHOW_TRANSCRIPTS = True
 # only speech starting with "Jarvis" or "stop" counts; the rest is discarded.
 ECHO_MODE = "headset"
 
-# On-device wake word: "Hey Jarvis" (usually also plain "Jarvis"), detected on the CPU
+# On-device wake word: "Hey Jarvis" (plain "Jarvis" is not reliable), detected on the CPU
 # by openWakeWord. While Jarvis is passive, nothing is sent to cloud speech recognition
 # until it fires. None = the old check for "Jarvis" in the cloud transcript.
 WAKE_WORD_ENGINE = "openwakeword"

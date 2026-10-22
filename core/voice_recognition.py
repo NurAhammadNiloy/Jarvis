@@ -74,11 +74,12 @@ def _wake_detector():
         from core.wake_word import create_detector
         detector = create_detector(WAKE_WORD_ENGINE, WAKE_WORD_THRESHOLD)
     except Exception as exc:
-        print(f"Wake-word detector unavailable ({type(exc).__name__}: {exc}); checking the transcript instead.")
+        print(f"Wake-word detector unavailable ({type(exc).__name__}: {exc}); "
+              'say "Jarvis" or "Hey Jarvis" (checked on the cloud transcript instead).')
         record('wake_word_unavailable', error=type(exc).__name__, detail=str(exc)[:200])
         return None
     if detector is not None:
-        print(f"Wake word: on-device ({WAKE_WORD_ENGINE}, threshold {WAKE_WORD_THRESHOLD}).")
+        print(f'Wake word: say "Hey Jarvis" (on-device {WAKE_WORD_ENGINE}, threshold {WAKE_WORD_THRESHOLD}).')
         record('wake_word_ready', engine=WAKE_WORD_ENGINE, threshold=WAKE_WORD_THRESHOLD)
     return detector
 

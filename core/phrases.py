@@ -17,6 +17,7 @@ SIR_RATE = 0.2
 PHRASES = {
     # --- conversation -------------------------------------------------------
     'greeting': ['Yes?', 'How can I help?', "I'm listening.", 'At your service.'],
+    'wake_hint': ['Say "Hey Jarvis" when you need me.'],  # printed when Jarvis goes passive
     'not_heard': ['Sorry?', 'Say again?', 'Come again?'],
     'not_heard_then': ['Sorry? {question}', 'Say again? {question}'],
     'repeat_please': ['Sorry, say that again?', 'Say that once more?', 'One more time?'],

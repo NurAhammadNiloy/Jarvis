@@ -1,9 +1,10 @@
 """On-device wake-word detection: openWakeWord's "hey jarvis" model, ONNX on the CPU.
 
 Nothing here touches the network except ensure_models(), which downloads the
-model files once into models/wake_word/ (inside the project, gitignored). The
-pretrained model was trained on "hey Jarvis"; it usually fires on "Jarvis" alone
-as well, but less reliably.
+model files once into models/wake_word/ (inside the project, gitignored).
+
+The wake phrase is "Hey Jarvis" only: the model was trained on it, and plain
+"Jarvis" was detected 0 of 10 times when measured on 22 Oct 2026 (tools/measure_wake_word.py).
 """
 from dataclasses import dataclass
 from pathlib import Path

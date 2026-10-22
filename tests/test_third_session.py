@@ -258,7 +258,7 @@ def test_passive_mode_is_announced(capsys):
     assistant, listener = window_assistant([0])
     listener.listen.return_value = Recognition('Jarvis', 0.9)
     assistant.wait_for_wake_word()
-    assert capsys.readouterr().out.splitlines()[0] == '[Passive mode]'
+    assert capsys.readouterr().out.splitlines()[0] == '[Passive mode] Say "Hey Jarvis" when you need me.'
 
 
 def test_weak_speech_is_still_heard_while_an_answer_is_pending(jarvis):

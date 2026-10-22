@@ -1,11 +1,11 @@
 """Measure the on-device wake word in your room, with your voice and microphone.
 
     env\\Scripts\\python.exe -B tools\\measure_wake_word.py
-    env\\Scripts\\python.exe -B tools\\measure_wake_word.py --phrase "Jarvis" --threshold 0.4
+    env\\Scripts\\python.exe -B tools\\measure_wake_word.py --threshold 0.4
 
 1. Two minutes of normal room sound (talk, type, play a video; just don't say
-   "Jarvis"): every detection is a false wake-up.
-2. You say the wake phrase 10 times when prompted: how many were detected.
+   "Hey Jarvis"): every detection is a false wake-up.
+2. You say "Hey Jarvis" 10 times when prompted: how many were detected.
 
 It prints the scores so you can choose WAKE_WORD_THRESHOLD in config/settings.py.
 Nothing is recorded or saved, and nothing is sent anywhere.
@@ -59,7 +59,6 @@ def main():
     from config.settings import WAKE_WORD_THRESHOLD
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--threshold', type=float, default=WAKE_WORD_THRESHOLD)
-    parser.add_argument('--phrase', default='Hey Jarvis')
     parser.add_argument('--background-seconds', type=float, default=120)
     parser.add_argument('--tries', type=int, default=10)
     parser.add_argument('--device', default=None, help='input device name or index (default: the system microphone)')
@@ -69,11 +68,11 @@ def main():
     from core.wake_word import OpenWakeWordDetector
     detector = OpenWakeWordDetector(args.threshold)
     device = int(args.device) if args.device and args.device.isdigit() else args.device
-    print(f"Wake-word test: phrase \"{args.phrase}\", threshold {args.threshold:.2f}\n")
+    print(f"Wake-word test: \"Hey Jarvis\", threshold {args.threshold:.2f}\n")
 
     with MicrophoneFrames(VoiceConfig(input_device=device)) as frames:
         print(f"Step 1: {args.background_seconds / 60:.0f} minutes of normal room sound. Talk, type or play a video,")
-        print("but don't say \"Jarvis\". Starting in 3 seconds...")
+        print("but don't say \"Hey Jarvis\". Starting in 3 seconds...")
         listen(frames, detector, 3)
         false_wakes, highest = [], 0.0
         for start in range(0, int(args.background_seconds), 10):
@@ -85,11 +84,11 @@ def main():
             print(f"  {start + 10:.0f} s, highest score so far {highest:.2f}", end='\r')
         print(f"\nHighest background score: {highest:.2f}\n")
 
-        print(f"Step 2: say \"{args.phrase}\" when prompted, at your normal distance and volume.")
+        print("Step 2: say \"Hey Jarvis\" when prompted, at your normal distance and volume.")
         tries = []
         for number in range(1, args.tries + 1):
             listen(frames, detector, 1.5)  # a pause, and the end of the previous try
-            print(f"  ({number}/{args.tries}) Say \"{args.phrase}\" now...", end=' ', flush=True)
+            print(f"  ({number}/{args.tries}) Say \"Hey Jarvis\" now...", end=' ', flush=True)
             found, peak = listen(frames, detector, 4)
             hit = bool(found)
             tries.append((hit, found[0][1] if hit else peak))

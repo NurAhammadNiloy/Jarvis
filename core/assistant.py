@@ -628,7 +628,7 @@ class Assistant:
     # --- loops ------------------------------------------------------------------
 
     def wait_for_wake_word(self):
-        print("[Passive mode]")
+        print("[Passive mode] " + say('wake_hint'))
         while True:
             if self.process_recognition(self.listener.listen(timeout=1), passive=True):
                 return
