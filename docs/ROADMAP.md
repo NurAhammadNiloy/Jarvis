@@ -330,6 +330,14 @@ oversight.
 
 ## Open questions (your decisions)
 
+**Decided on 22 October 2026; see [DECISIONS.md](DECISIONS.md).** Changes from the
+defaults below:
+- the microphone is wired headphones with a mic (headset mode);
+- the course system is Itslearning, with the timetable in Tuudo; integration
+  options are to be investigated in Phase 6.
+
+The table is kept as the record of what was asked.
+
 Each one has the default I'd use if you don't decide otherwise.
 
 | # | Question | Recommended default |
