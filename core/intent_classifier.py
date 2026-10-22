@@ -65,6 +65,8 @@ RULES = (
                           + r"|\b(?:week|weekend|tomorrow)['’]?s?\b.*\bweather\b"),
     ('weather',           r"\bweather\b|\btemperature\b(?!\s+of\b)"
                           + r"|\b(?:should|can)\s+i\s+(?:go\s+out(?:side)?|wear)\b|\bgo\s+outside\b"
+                          + r"|\b(?:do\s+i\s+need|should\s+i\s+(?:bring|take)|will\s+i\s+need)\s+(?:an?\s+)?(?:umbrella|jacket|coat|sweater)\b"
+                          + r"|\b(?:will\s+it\s+rain|is\s+it\s+going\s+to\s+rain)\b"
                           + r"|\bwhat\s+(?:should\s+i|to)\s+wear\b"
                           + r"|\bhow\s+(?:cold|hot|warm)\s+is\s+it\b"
                           + r"|\bis\s+it\s+(?:cold|hot|warm|raining|snowing)\b"),

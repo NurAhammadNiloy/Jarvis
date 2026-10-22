@@ -76,11 +76,15 @@ def understand_query(query, services, default_location=DEFAULT_LOCATION):
     elif intent in TIMER_ACTIONS:
         args = dict(services.extract_timer_info(query), action=TIMER_ACTIONS[intent])
     elif intent == "weather":
-        detailed = any(k in lower for k in ["should i", "what should", "wear", "go out", "tell me about", "detailed", "full", "everything", "more"])
+        # Advice questions ("should I wear a jacket?") get one short sentence; the full
+        # report is for when it is asked for.
+        detailed = any(k in lower for k in ["tell me about", "detail", "full", "everything", "more"])
         context = None
-        if any(k in lower for k in ["should i go", "can i go", "go outside"]):
+        if any(k in lower for k in ["umbrella", "will it rain", "is it raining", "going to rain"]):
+            context = "umbrella"
+        elif any(k in lower for k in ["should i go", "can i go", "go outside", "go out"]):
             context = "go_outside"
-        elif any(k in lower for k in ["should i wear", "what should i wear", "what to wear"]):
+        elif any(k in lower for k in ["should i wear", "what should i wear", "what to wear", "jacket", "coat", "sweater"]):
             context = "clothing"
         elif any(k in lower for k in ["how cold", "how hot", "is it cold", "is it hot", "is it warm"]):
             context = "temperature"

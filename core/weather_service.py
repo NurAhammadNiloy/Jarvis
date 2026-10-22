@@ -3,6 +3,7 @@ import geocoder
 from datetime import datetime
 from config.api_keys import WEATHER_API_KEY, GOOGLE_API_KEY
 from config.settings import NETWORK_TIMEOUT_SECONDS
+from core.phrases import part, say
 from core.service_errors import ServiceError
 
 def get_user_location():
@@ -52,127 +53,172 @@ def get_city_from_coordinates(lat, lon):
         return None
 
 def _format_temperature(temperature):
-    """Format temperature with proper grammar."""
+    """'10 degrees', '1 degree', '0 degrees'."""
     if -0.5 < temperature < 0.5:
-        return "0 degrees"
-    elif abs(round(temperature)) == 1:
-        return f"{round(temperature)} degree"
-    else:
-        return f"{round(temperature)} degrees"
+        return part("temp_zero")
+    rounded = round(temperature)
+    return part("temp_one" if abs(rounded) == 1 else "temp_many", n=rounded)
 
 def _get_feels_like_description(actual, feels_like):
     """Describe the 'feels like' temperature difference."""
     diff = feels_like - actual
-    if abs(diff) < 2:
-        return ""
-    elif diff < -5:
-        return f", but it feels much colder at {_format_temperature(feels_like)} due to wind chill"
+    if diff < -5:
+        key = "feels_much_colder"
     elif diff < -2:
-        return f", feels like {_format_temperature(feels_like)}"
+        key = "feels_colder"
     elif diff > 5:
-        return f", but it feels much warmer at {_format_temperature(feels_like)}"
+        key = "feels_much_warmer"
     elif diff > 2:
-        return f", feels like {_format_temperature(feels_like)}"
-    return ""
+        key = "feels_warmer"
+    else:
+        return ""
+    return part(key, temp=_format_temperature(feels_like))
 
 def _get_wind_description(wind_speed):
     """Get a human-friendly wind description."""
     if wind_speed < 1:
-        return "calm"
+        return part("wind_calm")
     elif wind_speed < 4:
-        return "a light breeze"
+        return part("wind_light")
     elif wind_speed < 8:
-        return "a moderate breeze"
+        return part("wind_moderate")
     elif wind_speed < 14:
-        return "quite windy"
+        return part("wind_quite")
     elif wind_speed < 20:
-        return "very windy"
+        return part("wind_very")
     else:
-        return "extremely windy with strong gusts"
+        return part("wind_extreme")
 
 def _get_humidity_comment(humidity, temperature):
     """Get humidity-related comfort comment."""
     if humidity > 80 and temperature > 20:
-        return " The humidity is high, so it might feel muggy."
+        return say("weather_humid_high")
     elif humidity < 30:
-        return " The air is quite dry."
+        return say("weather_dry")
     return ""
 
 def _get_time_of_day():
     """Get current time of day for contextual responses."""
     hour = datetime.now().hour
     if 5 <= hour < 12:
-        return "morning"
+        return part("part_morning")
     elif 12 <= hour < 17:
-        return "afternoon"
+        return part("part_afternoon")
     elif 17 <= hour < 21:
-        return "evening"
+        return part("part_evening")
     else:
-        return "night"
+        return part("part_night")
 
 def _get_activity_suggestion(weather, temperature, wind_speed, is_daytime):
     """Suggest activities based on current conditions."""
     if temperature <= -15:
-        return "Perfect weather for a warm drink and a good book indoors."
+        return say("activity_indoors_book")
     elif temperature <= -5:
         if "clear" in weather or "snow" in weather:
-            return "Great for a quick winter walk if you're bundled up!"
-        return "A cozy day to stay warm inside."
+            return say("activity_winter_walk")
+        return say("activity_cozy")
     elif temperature <= 5:
         if "rain" in weather:
-            return "Good weather for indoor activities."
-        return "Nice for a brisk walk with a warm jacket."
+            return say("activity_indoor")
+        return say("activity_brisk")
     elif 15 <= temperature <= 25:
         if "clear" in weather and is_daytime:
-            return "Perfect weather for outdoor activities!"
+            return say("activity_outdoor")
         elif "cloud" in weather:
-            return "Great for a walk or outdoor exercise."
+            return say("activity_walk")
         elif "rain" in weather:
-            return "Maybe save the outdoor plans for later."
+            return say("activity_save_plans")
     elif temperature > 25:
         if is_daytime:
-            return "Stay hydrated if you're heading out."
-        return "A pleasant evening to be outside."
+            return say("activity_hydrated")
+        return say("activity_evening")
     return ""
 
 def _get_clothing_suggestion(temperature, weather, wind_speed):
     """Suggest appropriate clothing."""
-    suggestions = []
-    
+    keys = []
+
     if temperature <= -20:
-        suggestions = ["thermal layers", "a heavy winter coat", "insulated boots", "gloves", "a warm hat", "a scarf covering your face"]
+        keys = ["wear_thermal", "wear_heavy_coat", "wear_boots_insulated", "wear_gloves", "wear_hat_warm", "wear_scarf"]
     elif temperature <= -10:
-        suggestions = ["multiple layers", "a warm winter coat", "warm boots", "gloves", "a hat"]
+        keys = ["wear_layers", "wear_winter_coat", "wear_boots_warm", "wear_gloves", "wear_hat"]
     elif temperature <= 0:
-        suggestions = ["a winter jacket", "warm layers", "gloves"]
+        keys = ["wear_winter_jacket", "wear_warm_layers", "wear_gloves"]
     elif temperature <= 10:
-        suggestions = ["a warm jacket or coat"]
+        keys = ["wear_warm_jacket"]
     elif temperature <= 18:
-        suggestions = ["a light jacket or sweater"]
+        keys = ["wear_light_jacket"]
     elif temperature > 28:
-        suggestions = ["light, breathable clothing"]
-    
+        keys = ["wear_breathable"]
+
     if "rain" in weather and temperature > 0:
-        suggestions.append("an umbrella")
+        keys.append("wear_umbrella")
     if "snow" in weather:
-        suggestions.append("waterproof boots")
+        keys.append("wear_boots_waterproof")
     if wind_speed > 10 and temperature < 10:
-        suggestions.append("a windbreaker")
-    
+        keys.append("wear_windbreaker")
+
+    suggestions = [part(key) for key in keys]
     if not suggestions:
         return ""
     elif len(suggestions) == 1:
-        return f"I'd recommend {suggestions[0]}."
+        return say("weather_recommend_one", items=suggestions[0])
     else:
-        return f"I'd recommend {', '.join(suggestions[:-1])}, and {suggestions[-1]}."
+        return say("weather_recommend_many", items=', '.join(suggestions[:-1]), last=suggestions[-1])
+
+# Questions answered with one short sentence (the key reason) unless details are asked for.
+ADVICE_CONTEXTS = ("clothing", "go_outside", "umbrella")
+
+def _get_advice(context, temperature, feels_like, weather, wind_speed):
+    """'Light jacket: 10 degrees and breezy.' / 'No: clear sky.' / 'Yes: 10 degrees, clear sky.'"""
+    temp = _format_temperature(temperature)
+    wet = any(word in weather for word in ("rain", "drizzle", "shower", "thunder"))
+    snow = "snow" in weather
+    if context == "umbrella":
+        return say("adv_umbrella_yes" if wet else "adv_umbrella_snow" if snow else "adv_umbrella_no", weather=weather)
+    if context == "go_outside":
+        if temperature <= -15:
+            return say("adv_go_stay", temp=temp)
+        if temperature <= 5:
+            return say("adv_go_bundle", temp=temp, weather=weather)
+        if wet or "storm" in weather:
+            return say("adv_go_wait", weather=weather)
+        return say("adv_go_yes", temp=temp, weather=weather)
+    if temperature <= -20:
+        item = "adv_item_thermal"
+    elif temperature <= -10:
+        item = "adv_item_heavy"
+    elif temperature <= 0:
+        item = "adv_item_winter"
+    elif temperature < 10:
+        item = "adv_item_warm"
+    elif temperature <= 18:
+        item = "adv_item_light"
+    else:
+        item = "adv_item_none"
+    # The one thing that matters most: rain or snow, then a wind chill, then wind.
+    if wet:
+        extra = part("adv_and_rainy")
+    elif snow:
+        extra = part("adv_and_snowy")
+    elif feels_like - temperature <= -4:
+        extra = part("adv_feels", temp=_format_temperature(feels_like))
+    elif wind_speed >= 8:
+        extra = part("adv_and_windy")
+    elif wind_speed >= 4:
+        extra = part("adv_and_breezy")
+    else:
+        extra = ""
+    return say("adv_wear", item=part(item), reason=temp + extra)
 
 def get_weather(city, detailed=False, question_context=None):
     """Get comprehensive weather information for a city.
-    
+
     Args:
         city: City name
         detailed: Whether to include full details
-        question_context: Type of question asked ('go_outside', 'clothing', 'temperature')
+        question_context: Type of question asked ('go_outside', 'clothing', 'umbrella', 'temperature').
+            Advice questions get one short sentence unless details were asked for.
     """
     base_url = "http://api.openweathermap.org/data/2.5/weather"
     params = {
@@ -185,7 +231,7 @@ def get_weather(city, detailed=False, question_context=None):
         response = requests.get(base_url, params=params, timeout=NETWORK_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
-            
+
             # Extract all weather data
             temperature = data["main"]["temp"]
             feels_like = data["main"]["feels_like"]
@@ -195,127 +241,132 @@ def get_weather(city, detailed=False, question_context=None):
             humidity = data["main"]["humidity"]
             visibility = data.get("visibility", 10000) / 1000  # Convert to km
             clouds = data.get("clouds", {}).get("all", 0)
-            
+
             # Sunrise/sunset for day/night detection
             sunrise = data["sys"].get("sunrise", 0)
             sunset = data["sys"].get("sunset", 0)
             current_time = datetime.now().timestamp()
             is_daytime = sunrise < current_time < sunset
-            
+
             time_of_day = _get_time_of_day()
             temp_text = _format_temperature(temperature)
             feels_like_text = _get_feels_like_description(temperature, feels_like)
             clothing = _get_clothing_suggestion(temperature, weather, wind_speed)
-            
+
+            # ADVICE - "should I wear a jacket?": one sentence with the key reason
+            if not detailed and question_context in ADVICE_CONTEXTS:
+                return _get_advice(question_context, temperature, feels_like, weather, wind_speed)
+
             # BRIEF MODE - concise response
             if not detailed:
+                values = dict(city=city, temp=temp_text, feels=feels_like_text, weather=weather)
                 if temperature <= -15:
-                    return f"It's extremely cold in {city}. {temp_text}{feels_like_text}, {weather}."
+                    return say("weather_brief_extreme", **values)
                 elif temperature <= -5:
-                    return f"Very cold in {city}. {temp_text}{feels_like_text}, {weather}."
+                    return say("weather_brief_very_cold", **values)
                 elif temperature <= 0:
-                    return f"Freezing in {city}. {temp_text}, {weather}."
+                    return say("weather_brief_freezing", **values)
                 elif temperature <= 10:
-                    return f"It's cool in {city}. {temp_text}, {weather}."
+                    return say("weather_brief_cool", **values)
                 elif temperature <= 20:
-                    return f"Mild weather in {city}. {temp_text}, {weather}."
+                    return say("weather_brief_mild", **values)
                 elif temperature <= 28:
-                    return f"Pleasant {temp_text} in {city}, {weather}."
+                    return say("weather_brief_pleasant", **values)
                 else:
-                    return f"It's hot in {city}. {temp_text}, {weather}."
-            
+                    return say("weather_brief_hot", **values)
+
             # DETAILED MODE - full response with suggestions
             parts = []
-            
+            values = dict(city=city, temp=temp_text, feels=feels_like_text, weather=weather, part=time_of_day)
+
             # Contextual opener based on question type
             if question_context == "go_outside":
                 # "Should I go outside?" - Direct answer first
                 if temperature <= -15:
-                    parts.append(f"Well sir, I wouldn't recommend it right now.")
+                    parts.append(say("weather_go_no"))
                 elif temperature <= -5:
-                    parts.append(f"Well sir, only if you bundle up really well.")
+                    parts.append(say("weather_go_bundle"))
                 elif temperature <= 5:
-                    parts.append(f"Well sir, you can, but dress warmly.")
+                    parts.append(say("weather_go_dress"))
                 elif 15 <= temperature <= 25 and "rain" not in weather:
-                    parts.append(f"Absolutely sir, it's lovely outside!")
+                    parts.append(say("weather_go_lovely"))
                 elif "rain" in weather or "storm" in weather:
-                    parts.append(f"Well sir, I'd wait a bit - the weather isn't ideal.")
+                    parts.append(say("weather_go_wait"))
                 else:
-                    parts.append(f"Well sir, it's decent outside.")
+                    parts.append(say("weather_go_decent"))
             elif question_context == "clothing":
                 # "What should I wear?" - Lead with clothing
-                parts.append(f"Well sir, for {city} right now,")
+                parts.append(say("weather_wear_opener", city=city))
                 if clothing:
                     parts.append(clothing)
             elif question_context == "temperature":
                 # "How cold/hot is it?" - Temperature focused
-                parts.append(f"Well sir, it's {temp_text} in {city}{feels_like_text}.")
-            
+                parts.append(say("weather_temp_opener", **values))
+
             # Weather details (skip the intro if we already have a contextual opener)
             if question_context:
                 # Add condensed weather info after contextual opener
-                parts.append(f"It's {temp_text} in {city}{feels_like_text}, with {weather}.")
+                parts.append(say("weather_context", **values))
             elif temperature <= -20:
-                parts.append(f"Sir, it's dangerously cold in {city} right now. {temp_text}{feels_like_text}.")
-                parts.append(f"Current conditions: {weather}.")
-                parts.append("I strongly advise staying indoors unless absolutely necessary.")
+                parts.append(say("weather_d_dangerous", **values))
+                parts.append(say("weather_d_conditions", **values))
+                parts.append(say("weather_d_indoors"))
             elif temperature <= -10:
-                parts.append(f"It's very cold in {city} this {time_of_day}. {temp_text}{feels_like_text}, with {weather}.")
+                parts.append(say("weather_d_very_cold", **values))
             elif temperature <= 0:
-                parts.append(f"Freezing temperatures in {city}. Currently {temp_text}{feels_like_text}, with {weather}.")
+                parts.append(say("weather_d_freezing", **values))
             elif temperature <= 10:
-                parts.append(f"It's quite cool in {city}. {temp_text}{feels_like_text}, with {weather}.")
+                parts.append(say("weather_d_cool", **values))
             elif temperature <= 20:
                 if "clear" in weather or "sun" in weather:
-                    parts.append(f"Lovely weather in {city} this {time_of_day}! {temp_text} with {weather}.")
+                    parts.append(say("weather_d_lovely", **values))
                 else:
-                    parts.append(f"Mild conditions in {city}. {temp_text} with {weather}.")
+                    parts.append(say("weather_d_mild", **values))
             elif temperature <= 28:
-                parts.append(f"Warm weather in {city}! {temp_text} with {weather}.")
+                parts.append(say("weather_d_warm", **values))
             else:
-                parts.append(f"It's hot in {city} today. {temp_text}{feels_like_text}, with {weather}.")
-            
+                parts.append(say("weather_d_hot", **values))
+
             # Wind information (if notable)
             if wind_speed >= 4:
-                wind_desc = _get_wind_description(wind_speed)
-                parts.append(f"It's {wind_desc} at {round(wind_speed)} meters per second.")
-            
+                parts.append(say("weather_wind", wind=_get_wind_description(wind_speed), speed=round(wind_speed)))
+
             # Visibility warning
             if visibility < 1:
-                parts.append("Visibility is very poor - please be careful if driving.")
+                parts.append(say("weather_vis_poor"))
             elif visibility < 5:
-                parts.append("Visibility is somewhat reduced.")
-            
+                parts.append(say("weather_vis_reduced"))
+
             # Humidity comment
             humidity_comment = _get_humidity_comment(humidity, temperature)
             if humidity_comment:
-                parts.append(humidity_comment.strip())
-            
+                parts.append(humidity_comment)
+
             # Clothing suggestion (skip if already added for clothing context)
             if question_context != "clothing" and clothing:
                 parts.append(clothing)
-            
+
             # Activity suggestion
             activity = _get_activity_suggestion(weather, temperature, wind_speed, is_daytime)
             if activity:
                 parts.append(activity)
-            
+
             # Detailed mode - add extra info
             if detailed:
-                parts.append(f"Humidity is at {humidity}%, and cloud cover is {clouds}%.")
-            
+                parts.append(say("weather_humidity_cloud", humidity=humidity, clouds=clouds))
+
             return " ".join(parts)
 
         elif response.status_code == 404:
-            raise ServiceError(f"I couldn't find weather data for {city}. Could you check the spelling?")
+            raise ServiceError(say("weather_not_found", city=city))
         elif response.status_code == 401:
-            raise ServiceError("There's an issue with the weather service authentication. Please check the API key.")
+            raise ServiceError(say("weather_auth"))
         else:
-            raise ServiceError(f"I encountered an issue getting the weather: {response.status_code}. Let me try again later.")
+            raise ServiceError(say("weather_http", status=response.status_code))
     except requests.exceptions.Timeout:
-        raise ServiceError("The weather service took too long to respond. Please try again.")
+        raise ServiceError(say("weather_timeout"))
     except requests.exceptions.RequestException:
-        raise ServiceError("I'm having trouble connecting to the weather service right now. Please try again in a moment.")
+        raise ServiceError(say("weather_connect"))
 
 def get_forecast(city, days=3):
     """Get weather forecast for upcoming days."""
@@ -326,12 +377,12 @@ def get_forecast(city, days=3):
         "units": "metric",
         "cnt": days * 8  # API returns 3-hour intervals
     }
-    
+
     try:
         response = requests.get(base_url, params=params, timeout=NETWORK_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
-            
+
             # Group by day
             daily_data = {}
             for item in data["list"]:
@@ -345,77 +396,77 @@ def get_forecast(city, days=3):
                 daily_data[date]["temps"].append(item["main"]["temp"])
                 daily_data[date]["weather"].append(item["weather"][0]["description"])
                 daily_data[date]["wind"].append(item["wind"]["speed"])
-            
+
             # Build conversational forecast
             days_list = list(daily_data.items())[:days]
-            
+
             if not days_list:
-                raise ServiceError(f"I couldn't get forecast data for {city}.")
-            
-            parts = [f"Sir, here's the outlook for {city}."]
-            
+                raise ServiceError(say("forecast_none", city=city))
+
+            parts = [say("forecast_intro", city=city)]
+
             for i, (day, info) in enumerate(days_list):
                 min_temp = round(min(info["temps"]))
                 max_temp = round(max(info["temps"]))
                 weather = max(set(info["weather"]), key=info["weather"].count)
                 avg_wind = sum(info["wind"]) / len(info["wind"])
-                
+
                 # Make it conversational based on conditions
                 if i == 0:
-                    day_word = "Today" if datetime.now().strftime("%A") == day else day
+                    day_word = part("forecast_today") if datetime.now().strftime("%A") == day else day
                 else:
                     day_word = day
-                
+
                 # Temperature description
                 if max_temp <= -15:
-                    temp_feel = "dangerously cold"
+                    temp_feel = part("forecast_dangerous")
                 elif max_temp <= -5:
-                    temp_feel = "very cold"
+                    temp_feel = part("forecast_very_cold")
                 elif max_temp <= 5:
-                    temp_feel = "quite chilly"
+                    temp_feel = part("forecast_chilly")
                 elif max_temp <= 15:
-                    temp_feel = "cool"
+                    temp_feel = part("forecast_cool")
                 elif max_temp <= 25:
-                    temp_feel = "pleasant"
+                    temp_feel = part("forecast_pleasant")
                 else:
-                    temp_feel = "warm"
-                
+                    temp_feel = part("forecast_warm")
+
                 # Weather advice
                 if "snow" in weather:
-                    weather_note = "expect some snow"
+                    weather_note = part("forecast_snow")
                 elif "rain" in weather:
-                    weather_note = "bring an umbrella"
+                    weather_note = part("forecast_rain")
                 elif "clear" in weather:
-                    weather_note = "skies will be clear"
+                    weather_note = part("forecast_clear")
                 elif "cloud" in weather:
-                    weather_note = "it'll be cloudy"
+                    weather_note = part("forecast_cloud")
                 else:
                     weather_note = weather
-                
+
                 # Build the day's forecast naturally
                 if min_temp == max_temp:
-                    temp_text = f"around {min_temp} degrees"
+                    temp_text = part("forecast_around", n=min_temp)
                 else:
-                    temp_text = f"between {min_temp} and {max_temp} degrees"
-                
-                parts.append(f"{day_word} will be {temp_feel}, {temp_text}, and {weather_note}.")
-            
+                    temp_text = part("forecast_between", low=min_temp, high=max_temp)
+
+                parts.append(say("forecast_day", day=day_word, feel=temp_feel, temp=temp_text, note=weather_note))
+
             # Add overall advice
             coldest = min(min(info["temps"]) for _, info in days_list)
             if coldest <= -10:
-                parts.append("Bundle up warmly if you're heading out this week!")
+                parts.append(say("forecast_bundle"))
             elif any("rain" in max(set(info["weather"]), key=info["weather"].count) for _, info in days_list):
-                parts.append("Keep an umbrella handy!")
+                parts.append(say("forecast_umbrella"))
             elif any("snow" in max(set(info["weather"]), key=info["weather"].count) for _, info in days_list):
-                parts.append("Looks like we'll have some winter weather!")
-            
+                parts.append(say("forecast_winter"))
+
             return " ".join(parts)
         else:
-            raise ServiceError(f"I couldn't get the forecast for {city}, sir.")
+            raise ServiceError(say("forecast_failed", city=city))
     except requests.exceptions.Timeout:
-        raise ServiceError("The weather service took too long to respond. Please try again.")
+        raise ServiceError(say("weather_timeout"))
     except requests.exceptions.RequestException:
-        raise ServiceError("I'm having trouble getting the forecast right now, sir.")
+        raise ServiceError(say("forecast_connect"))
 
 def compare_weather(city1, city2):
     """Compare weather between two cities."""
@@ -424,20 +475,20 @@ def compare_weather(city1, city2):
     try:
         data1 = requests.get(base_url, params={"q": city1, "appid": WEATHER_API_KEY, "units": "metric"}, timeout=NETWORK_TIMEOUT_SECONDS).json()
         data2 = requests.get(base_url, params={"q": city2, "appid": WEATHER_API_KEY, "units": "metric"}, timeout=NETWORK_TIMEOUT_SECONDS).json()
-        
+
         temp1 = data1["main"]["temp"]
         temp2 = data2["main"]["temp"]
         diff = abs(temp1 - temp2)
-        
+
         if temp1 > temp2:
-            comparison = f"{city1} is {_format_temperature(diff)} warmer than {city2}."
+            comparison = say("compare_warmer", warm=city1, diff=_format_temperature(diff), cool=city2)
         elif temp2 > temp1:
-            comparison = f"{city2} is {_format_temperature(diff)} warmer than {city1}."
+            comparison = say("compare_warmer", warm=city2, diff=_format_temperature(diff), cool=city1)
         else:
-            comparison = f"Both cities are at the same temperature."
-        
-        return f"{city1}: {_format_temperature(temp1)} with {data1['weather'][0]['description']}. " \
-               f"{city2}: {_format_temperature(temp2)} with {data2['weather'][0]['description']}. " \
-               f"{comparison}"
-    except:
-        return f"I couldn't compare the weather between {city1} and {city2}."
+            comparison = say("compare_same")
+
+        return say("compare_line", city1=city1, temp1=_format_temperature(temp1), weather1=data1['weather'][0]['description'],
+                   city2=city2, temp2=_format_temperature(temp2), weather2=data2['weather'][0]['description'],
+                   comparison=comparison)
+    except Exception:
+        return say("compare_failed", city1=city1, city2=city2)

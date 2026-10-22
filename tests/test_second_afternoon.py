@@ -344,3 +344,100 @@ def test_a_single_reminder_and_an_empty_list(jarvis):
     jarvis.services.reminders.create({'task': 'stand up', 'due': NOW.replace(hour=17)})
     jarvis.hear(heard('Jarvis list my reminders', 0.9))
     assert jarvis.said()[-2:] == ['You have 1 reminder.', 'stand up, today at 5:20 PM.']
+
+
+# --- weather: advice in one short sentence, wording in core/phrases.py -----------------------------
+
+def weather_reply(temp=10.4, description='clear sky', wind=5.0, feels=9.5):
+    """What OpenWeatherMap said at 14:25 in Kokkola (seq 1058), adjustable."""
+    return Mock(status_code=200, json=Mock(return_value={
+        'main': {'temp': temp, 'feels_like': feels, 'humidity': 60},
+        'weather': [{'description': description, 'main': description.split()[-1]}],
+        'wind': {'speed': wind}, 'visibility': 10000, 'clouds': {'all': 0},
+        'sys': {'sunrise': 0, 'sunset': 9999999999}}))
+
+
+@pytest.fixture
+def kokkola(monkeypatch):
+    from core import weather_service
+    monkeypatch.setattr(weather_service.requests, 'get', lambda *a, **k: weather_reply())
+    return weather_service
+
+
+JACKET = heard('Jarvis should I wear a jacket today', 0.90784991, ('Yarvis should I wear a jacket today', 0.90784991))  # 1053
+
+
+def test_should_i_wear_a_jacket_gets_one_short_sentence_with_the_reason(jarvis, kokkola):
+    jarvis.hear(JACKET)
+    assert jarvis.said() == ['Light jacket: 10 degrees and breezy.']
+
+
+@pytest.mark.parametrize('question, answer', [
+    ('Jarvis do I need an umbrella', 'No: clear sky.'),
+    ('Jarvis should I go outside', 'Yes: 10 degrees, clear sky.'),
+    ('Jarvis do I need a coat', 'Light jacket: 10 degrees and breezy.'),
+    ('Jarvis what should I wear', 'Light jacket: 10 degrees and breezy.'),
+])
+def test_other_advice_questions_are_one_sentence_too(jarvis, kokkola, question, answer):
+    jarvis.hear(heard(question, 0.9))
+    assert jarvis.said() == [answer]
+
+
+@pytest.mark.parametrize('question', ['Jarvis should I wear a jacket, tell me everything about it',
+                                      'Jarvis should I wear a jacket, in detail'])
+def test_full_details_only_when_asked_for(jarvis, kokkola, question):
+    jarvis.hear(heard(question, 0.9))
+    text = jarvis.said()[-1]
+    assert 'Humidity is at 60%, and cloud cover is 0%.' in text and "I'd recommend a light jacket" in text
+    assert ' sir' not in text.lower()
+
+
+def test_the_plain_weather_report_is_unchanged_in_substance(jarvis, kokkola):
+    jarvis.hear(heard('Jarvis what is the weather today', 0.84072971))
+    assert jarvis.said() == ['Mild weather in Kokkola. 10 degrees, clear sky.']
+    jarvis.hear(heard('Jarvis tell me about the weather', 0.9))
+    text = jarvis.said()[-1]
+    assert 'Humidity is at 60%' in text and 'moderate breeze at 5 meters per second' in text
+
+
+@pytest.mark.parametrize('temp, description, wind, feels, expected', [
+    (-25, 'clear sky', 1, -25, 'Heavy coat and warm layers: -25 degrees.'),
+    (-12, 'clear sky', 1, -12, 'Warm winter coat: -12 degrees.'),
+    (-3, 'light snow', 1, -3, 'Winter jacket: -3 degrees and snowy.'),
+    (5, 'clear sky', 1, 5, 'Warm jacket: 5 degrees.'),
+    (5, 'clear sky', 6, -1, 'Warm jacket: 5 degrees, feels like -1 degree.'),
+    (12, 'light rain', 2, 12, 'Light jacket: 12 degrees and rainy.'),
+    (14, 'few clouds', 9, 14, 'Light jacket: 14 degrees and windy.'),
+    (22, 'clear sky', 1, 22, 'No jacket needed: 22 degrees.'),
+])
+def test_jacket_advice_names_the_key_reason(temp, description, wind, feels, expected):
+    from core.weather_service import _get_advice
+    assert _get_advice('clothing', temp, feels, description, wind) == expected
+
+
+def test_umbrella_and_outdoor_advice():
+    from core.weather_service import _get_advice
+    assert _get_advice('umbrella', 12, 12, 'light rain', 2) == 'Yes: light rain.'
+    assert _get_advice('umbrella', -2, -2, 'light snow', 2) == 'Not for snow: light snow.'
+    assert _get_advice('go_outside', -20, -25, 'clear sky', 2) == 'Better to stay in: -20 degrees.'
+    assert _get_advice('go_outside', -6, -6, 'clear sky', 2) == 'Bundle up: -6 degrees, clear sky.'
+    assert _get_advice('go_outside', 12, 12, 'thunderstorm', 2) == 'Better wait: thunderstorm.'
+
+
+@pytest.mark.parametrize('utterance', ['should I wear a jacket', 'do I need an umbrella', 'will it rain today',
+                                       'do I need a coat', 'should I go outside'])
+def test_advice_questions_route_to_the_weather(utterance):
+    assert route(utterance).intent == 'weather'
+
+
+def test_no_fixed_weather_wording_is_left_in_the_weather_service():
+    import re
+    from pathlib import Path
+    from core.phrases import PHRASES
+    source = Path('core/weather_service.py').read_text(encoding='utf-8')
+    for old in ('Freezing in', "I'd recommend", 'Perfect weather', 'Well sir', 'dangerously cold', 'Visibility is',
+                'Humidity is', "Here's the outlook", 'light breeze', 'Bundle up', 'Keep an umbrella', 'Sir,'):
+        assert old not in source, old
+    reports = source[source.index('def _format_temperature'):]
+    assert not re.search(r'(?<![\w"])f"[^"\n]*[A-Za-z]{4,} [A-Za-z]{3,}', reports)    # no sentence built in f-strings
+    assert all('sir' not in ' '.join(v).lower().split() for k, v in PHRASES.items() if k.startswith(('weather', 'adv_')))
