@@ -98,6 +98,13 @@ class Assistant:
             if self.active_conversation:
                 self.last_active_time = self.clock()
             return False
+        if (recognition.wake_heard is False and passive and not self.state.pending
+                and route(recognition.text).intent == 'chat'):
+            # The on-device detector fired, but the transcript has no "Jarvis" (nor a word it
+            # is misheard as) and no command: most likely a false wake (a video, someone else).
+            # It costs one recognition, never a spoken reply, and Jarvis stays passive.
+            record('voice_decision', decision='ignore', reason='wake_not_confirmed', text=recognition.text)
+            return False
         addressed = strip_wake_word(recognition.text)
         if addressed is None and recognition.wake_score is not None:
             # The on-device detector heard the wake word; the text is what followed it.

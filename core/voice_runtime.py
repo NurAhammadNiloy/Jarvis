@@ -6,7 +6,7 @@ import threading
 import time
 
 from core.voice_capture import AudioUtterance, Endpointer, VoiceConfig
-from core.voice_policy import Recognition, can_interrupt, is_echo, means_stop, stop_heard, strip_wake_word
+from core.voice_policy import Recognition, can_interrupt, is_echo, means_stop, stop_heard, strip_wake_word, wake_like
 from core.conversation_log import record, record_recognition
 
 
@@ -188,9 +188,9 @@ class ContinuousListener:
         """The wake word was heard on-device. A transcript that has it too is kept. One
         that misheard it ("nervous what time is it") or heard nothing is replaced by the
         recognition of the audio after the wake word: the request, or nothing (the wake
-        word alone)."""
+        word alone). wake_heard says whether the transcript backs up the detector."""
         if not result.error and strip_wake_word(result.text) is not None:
-            return replace(result, wake_score=utterance.wake_score)
+            return replace(result, wake_score=utterance.wake_score, wake_heard=True)
         if result.error not in (None, 'unrecognized'):
             return replace(result, wake_score=utterance.wake_score)  # e.g. recognition unavailable
         c = self.config
@@ -204,7 +204,8 @@ class ContinuousListener:
             return replace(result, wake_score=utterance.wake_score)
         final = Recognition(after.text if not after.error else '', after.confidence if not after.error else None,
                             after.alternatives, playback_id=result.playback_id, playback_text=result.playback_text,
-                            wake_score=utterance.wake_score, uid=result.uid)
+                            wake_score=utterance.wake_score, wake_heard=wake_like(result.text) if not result.error else False,
+                            uid=result.uid)
         record('voice_filter_passed', reason='wake_word_misheard', text=result.text, uid=result.uid)
         record_recognition(final)  # same uid: the transcript shows what is acted on
         return final

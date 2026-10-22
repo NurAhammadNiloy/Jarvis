@@ -27,6 +27,9 @@ class Recognition:
     # The on-device detector heard the wake word at the start of this utterance (its
     # score). The text is then addressed to Jarvis even if it lacks "Jarvis".
     wake_score: Optional[float] = None
+    # Only when wake_score is set: whether the cloud transcript of the utterance has the
+    # wake word, or a word it is misheard as (wake_like); None when unknown (no transcript).
+    wake_heard: Optional[bool] = None
     # Identifies one heard utterance in the log (kept by dataclasses.replace).
     uid: int = field(default_factory=itertools.count(1).__next__, compare=False)
 
@@ -102,6 +105,19 @@ def is_echo(text, playback_text):
 
 
 _WAKE_VARIANTS = {'jarvis', 'yarvis', 'jervis', 'javis'}
+# What the cloud recognizer also made of your "Jarvis" (logs/conversation.jsonl, Oct 2026).
+_WAKE_MISHEARD = {'service', 'nervous', 'jersey', 'jarred', 'travis'}
+
+
+def wake_like(text):
+    """Whether a transcript has the wake word, or a word it is often misheard as."""
+    from difflib import SequenceMatcher
+    for word in words(text):
+        word = re.sub(r"([a-z])\1+", r"\1", re.split(r"['’]", word)[0])
+        if (word in _WAKE_VARIANTS or word in _WAKE_MISHEARD
+                or len(word) >= 4 and SequenceMatcher(None, word, 'jarvis').ratio() >= 0.7):
+            return True
+    return False
 
 
 def _comparable(text):

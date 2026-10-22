@@ -286,3 +286,52 @@ def test_passive_listener_sends_only_woken_speech_to_recognition(clip, recognize
         assert result.text == 'hey Jarvis what time is it' and result.wake_score >= 0.5
     else:
         assert result is None
+
+
+# --- a false wake costs one recognition, never a spoken reply -------------------------------------
+
+@pytest.mark.parametrize('text, heard', [('hey Jarvis', True), ('Yarvis stop', True), ('nervous what time is it', True),
+                                         ('hey service', True), ('New Jersey', True), ("Jarvis's", True),
+                                         ('Travis', True), ('and then the video says hello', False), ('', False),
+                                         ('subscribe to my channel', False), ('hey guys', False)])
+def test_wake_like_words_in_a_transcript(text, heard):
+    from core.voice_policy import wake_like
+    assert wake_like(text) is heard
+
+
+def test_the_listener_says_whether_the_transcript_backs_up_the_detection():
+    jarvis, _ = listener(Recognition('hey Jarvis what time is it', 0.9))
+    assert jarvis.handle_final(woken()).wake_heard is True
+    jarvis, _ = listener(Recognition('nervous what time is it', 0.63), Recognition('what time is it', 0.91))
+    assert jarvis.handle_final(woken()).wake_heard is True
+    jarvis, _ = listener(Recognition('so in this video we', 0.8), Recognition('we', 0.5))
+    assert jarvis.handle_final(woken()).wake_heard is False
+    jarvis, _ = listener(Recognition(error='unrecognized'), Recognition(error='unrecognized'))
+    assert jarvis.handle_final(woken()).wake_heard is False
+    jarvis, _ = listener(Recognition(error='recognition_unavailable'))
+    assert jarvis.handle_final(woken()).wake_heard is None
+
+
+@pytest.mark.parametrize('text', ['', 'we', 'subscribe to my channel'])
+def test_an_unconfirmed_wake_without_a_command_stays_silent_and_passive(assistant, text):
+    assert not assistant.jarvis.process_recognition(
+        Recognition(text, 0.8, wake_score=0.53, wake_heard=False), passive=True)
+    assert assistant.said() == [] and not assistant.jarvis.active_conversation
+
+
+def test_an_unconfirmed_wake_with_a_command_is_still_carried_out(assistant):
+    # "Hey Jarvis" lost entirely by the recognizer, the request heard: act on it.
+    assert assistant.jarvis.process_recognition(
+        Recognition('what time is it', 0.91, wake_score=0.8, wake_heard=False), passive=True)
+    assert assistant.said()[-1].startswith("It's ")
+
+
+def test_a_confirmed_or_unknown_wake_still_greets(assistant):
+    assert assistant.jarvis.process_recognition(Recognition('', wake_score=0.8, wake_heard=True), passive=True)
+    assert assistant.said() == [assistant.said()[0]] and assistant.jarvis.active_conversation
+
+
+def test_only_passive_listening_is_silenced(assistant):
+    # Waiting for an answer, the wake word is not needed: the reply is handled as before.
+    assistant.jarvis.state.await_slot('alarm', 'time', 'set an alarm', 'What time should I set the alarm for?')
+    assert assistant.jarvis.process_recognition(Recognition('', wake_score=0.8, wake_heard=False), passive=True)
