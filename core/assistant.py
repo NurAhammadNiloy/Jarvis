@@ -238,6 +238,8 @@ class Assistant:
             return self._fill_task(recognition, text, state)
         if state.slot == 'timer':
             return self._fill_timer(recognition, text, state)
+        if state.slot == 'reminder':
+            return self._fill_reminder(recognition, text, state)
         # An answer that is a request of its own ('cancel the timer') is not a time.
         command = self._understand(completed) if route(text).intent == 'chat' else None
         question = self._time_question(command) if command else None
@@ -281,6 +283,40 @@ class Assistant:
         self._run(command)
         return True
 
+    def _fill_reminder(self, recognition, text, state):
+        """"Which one should I delete?" answered with "all of them", "everything", "the first
+        one", the reminder's words or its time ("the 9 PM one")."""
+        if route(text).intent != 'chat' or recognition.error or recognition.truncated:
+            self.state.clear('new request')
+            return None
+        record('pending_answer', state=state.describe(), answer='fill', text=text)
+        self.active_conversation = True
+        self.last_active_time = self.clock()
+        self.speech.stop()
+        if recognition.confidence is not None and recognition.confidence < 0.5:
+            self.output(say('which_one', question=state.prompt))
+            return True
+        args = state.command.arguments
+        kind = 'alarm' if state.command.intent == 'alarm' else None
+        reminders = self.services.reminders
+        listed = reminders.candidates(args.get('target'), args.get('when_text', ''), kind)
+        if _wants_all(text, [w for r in listed for w in words(r.text or '')]):
+            command = replace(state.command, arguments=dict(args, target=None, when_text='delete all'))
+        else:
+            ordinal = next((_ORDINALS[w] for w in words(text) if w in _ORDINALS), None)
+            if ordinal is not None and -len(listed) <= ordinal < len(listed):
+                target, when_text = (listed[ordinal].text or '').lower(), ''
+            else:
+                target = ' '.join(w for w in words(text) if w not in _NOT_A_NAME) or None
+                when_text = text
+            if not reminders.candidates(target, when_text, kind):
+                self.output(say('which_one', question=state.prompt))
+                return True
+            command = replace(state.command, arguments=dict(args, target=target, when_text=when_text))
+        self.state.clear('filled')
+        self._run(command)
+        return True
+
     def _fill_timer(self, recognition, text, state):
         """"Which timer?" answered by name ("the pasta one", "coffee"), by length
         ("5-minute timer") or by number ("timer 2")."""
@@ -289,6 +325,15 @@ class Assistant:
         except Exception:
             timers = []
         chosen = _match_timers(text, timers)
+        if (state.command.intent == 'cancel_timer' and _wants_all(text, []) and len(timers) > 1
+                and (recognition.confidence is None or recognition.confidence >= 0.5)):
+            record('pending_answer', state=state.describe(), answer='fill', text=text)
+            self.active_conversation = True
+            self.last_active_time = self.clock()
+            self.speech.stop()
+            self.state.clear('filled')
+            self._run(Command('cancel_all_timers', state.command.query, dict(state.command.arguments, action='cancel_all')))
+            return True
         if not chosen and route(text).intent != 'chat' and not _TIMER_ANSWER.match(text):
             self.state.clear('new request')
             return None
@@ -561,6 +606,9 @@ class Assistant:
         if result.pending_action == 'choose_timer':
             self.state.await_slot(result.intent, 'timer', query, result.messages[-1],
                                   Command(result.intent, query, result.data['args']))
+        elif result.pending_action == 'choose_reminder':
+            self.state.await_slot(result.intent, 'reminder', query, result.messages[-1],
+                                  Command(result.intent, query, result.data['args']))
         elif result.pending_action == 'reminder_task':
             self.state.await_slot(result.intent, 'task', query, result.messages[0],
                                   Command(result.intent, query, result.data['args']))
@@ -685,9 +733,32 @@ def _match_timers(text, timers):
 
 
 def _list_timers(timers):
+    """'tea, coffee or pasta' (at most three, then 'and N more')."""
     from core.command_description import duration_words
     names = [t.label.lower() if t.label else f"the {duration_words(t.duration_seconds, True)} one" for t in timers]
+    if len(names) > 3:
+        return ', '.join(names[:3]) + f" and {len(names) - 3} more"
     return ', '.join(names[:-1]) + ' or ' + names[-1] if len(names) > 1 else ''.join(names)
+
+
+# --- "which reminder?" and "all of them" ---------------------------------------------------
+
+_ORDINALS = {'first': 0, '1st': 0, 'second': 1, '2nd': 1, 'third': 2, '3rd': 2, 'fourth': 3, '4th': 3, 'last': -1}
+_NOT_A_NAME = {'the', 'one', 'reminder', 'reminders', 'alarm', 'alarms', 'delete', 'cancel', 'remove', 'snooze',
+               'please', 'that', 'a', 'my', 'it', 'sir', 'jarvis'}
+_ALL_WORDS = {'delete', 'cancel', 'remove', 'clear', 'all', 'of', 'them', 'the', 'everything', 'every', 'one', 'both',
+              'reminders', 'reminder', 'alarms', 'alarm', 'timers', 'timer', 'please', 'these', 'those', 'it', 'sir',
+              'jarvis', 'and', 'ones'}
+
+
+def _wants_all(text, names):
+    """"all", "all of them", "everything": the whole list. A garbled word or two after it
+    ("delete all of them before") is fine; a word that names one of the items is not."""
+    tokens = words(text)
+    if not ({'all', 'everything'} & set(tokens) or {'every', 'one'} <= set(tokens)):
+        return False
+    extra = [t for t in tokens if t not in _ALL_WORDS and len(t) > 2]
+    return len(extra) <= 1 and not any(t in names for t in extra)
 
 
 # "stop the music", "pause YouTube", "skip this song": playback Jarvis cannot control.

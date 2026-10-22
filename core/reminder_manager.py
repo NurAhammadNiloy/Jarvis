@@ -96,6 +96,16 @@ def describe_when(moment, now):
     return f"{day} at {clock_text(moment)}"
 
 
+# "Which one should I delete?" reads this many reminders, then "and N more".
+WHICH_LIMIT = 3
+_ALL = re.compile(r"\b(?:all|every|everything)\b", re.IGNORECASE)
+
+
+def _plain(text):
+    """The words of a reminder or a spoken name, without articles and 'my'."""
+    return [w for w in re.findall(r"\w+", (text or '').lower()) if w not in ('my', 'the', 'a', 'an')]
+
+
 def describe(reminder, now):
     if reminder.recurrence == 'daily':
         return f"every day at {clock_text(reminder.due)}"
@@ -260,14 +270,36 @@ class ReminderService:
     def delete(self, target=None, when_text='', kind=None):
         noun = 'alarm' if kind == 'alarm' else 'reminder'
         matches = self._matches(target, when_text, kind)
+        if _ALL.search(when_text or ''):
+            # "cancel all the reminders" means reminders; alarms are cancelled by "all the alarms".
+            matches = [r for r in matches if r.kind == (kind or 'reminder')]
         if not matches:
             return self._not_found(target, noun)
+        if len(matches) > 1 and _ALL.search(when_text or ''):
+            return self._delete_all(matches, noun)
         if len(matches) > 1:
             return self._which(matches, noun, 'delete')
         reminder = matches[0]
         self._set_status(reminder.id, 'cancelled')  # a soft delete, so it can be undone
         return ActionResult((say('reminder_deleted', label=label(reminder), when=describe(reminder, self.now())),),
                             undo=lambda: self._set_status(reminder.id, reminder.status))
+
+    def _delete_all(self, matches, noun):
+        """Soft-deletes every match (status 'cancelled', like a single delete), so one undo brings all back."""
+        before = [(r.id, r.status) for r in matches]
+        for reminder_id, _ in before:
+            self.store.set_status(reminder_id, 'cancelled')
+        self._changed()
+
+        def undo():
+            for reminder_id, status in before:
+                self.store.set_status(reminder_id, status)
+            self._changed()
+        return ActionResult((say('reminders_all_cancelled', count=len(matches), noun=noun),), undo=undo)
+
+    def candidates(self, target=None, when_text='', kind=None):
+        """The reminders a delete or snooze request could mean, in the order they are listed."""
+        return self._matches(target, when_text, kind)
 
     def snooze(self, target=None, minutes=10, when_text=''):
         now = self.now()
@@ -310,6 +342,9 @@ class ReminderService:
             wanted = re.findall(r"\w+", target.lower())
             candidates = [r for r in candidates
                           if all(w in re.findall(r"\w+", (r.text or '').lower()) for w in wanted)]
+            # "call mom" is exactly one reminder even when "call mom tomorrow" also contains its words.
+            exact = [r for r in candidates if _plain(r.text) == _plain(target)]
+            candidates = exact or candidates
         clock = find_clock(when_text) if when_text else None
         if clock:
             hour, minute, explicit = clock
@@ -327,9 +362,9 @@ class ReminderService:
 
     def _which(self, matches, noun, verb):
         now = self.now()
-        options = '; '.join(f"{label(r)}, {describe(r, now)}" for r in matches[:5])
-        if len(matches) > 5:
-            options += f"; and {len(matches) - 5} more"
+        options = '; '.join(f"{label(r)}, {describe(r, now)}" for r in matches[:WHICH_LIMIT])
+        if len(matches) > WHICH_LIMIT:
+            options += f"; and {len(matches) - WHICH_LIMIT} more"
         return ActionResult((say('reminder_which', count=len(matches), noun=noun, options=options, verb=verb),),
                             False, pending=True)
 

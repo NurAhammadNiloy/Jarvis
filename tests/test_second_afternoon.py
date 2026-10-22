@@ -223,3 +223,104 @@ def test_at_with_a_unit_is_relative_without_one_it_is_a_clock_time(request_, hou
     from core.reminder_parser import parse_reminder
     parsed = parse_reminder(request_, NOW)
     assert (parsed.due.hour, parsed.due.minute) == (hour, minute) and parsed.task == task
+
+
+# --- cancel all (the) reminders ---------------------------------------------------------------
+
+CANCEL_ALL = heard('Jarvis cancel all the reminders', 0.87971485,                                       # 681
+                   ('Yarvis cancel all the reminders', 0.87971485), ('where is cancel all the reminders', 0.7235834))
+EVERYTHING = heard('everything', 0.74927092, ('everthing', 0.74927092), ('everyting', 0.74927092))      # 729
+ALL_OF_THEM = heard('all of them', 0.8941285)                                                           # 792
+DELETE_ALL_BEFORE = heard('delete all of them before', 0.90412074,                                      # 862
+                          ('delete all of them the phone', 0.84785175), ('delete all of them the four', 0.90167409),
+                          ('delete all of them Tha phone', 0.84785175), ('delete all of them the 4:00', 0.80462366))
+SESSION_REMINDERS = ('call my Mom', 'delete my old emails', 'call my mom minutes', 'stand up')
+
+
+@pytest.fixture
+def four(jarvis):
+    """The four reminders of the 14:15 session (an alarm is added by the tests that need one)."""
+    for index, task in enumerate(SESSION_REMINDERS):
+        jarvis.services.reminders.create({'task': task, 'due': NOW.replace(hour=15 + index)})
+    return jarvis
+
+
+def pending_tasks(jarvis):
+    return [text for _, text, _ in jarvis.reminders()]
+
+
+def test_cancel_all_the_reminders_cancels_them_all_and_can_be_undone(four):
+    four.hear(CANCEL_ALL)
+    assert four.said()[-1] == 'All 4 reminders cancelled. Say undo to bring it back.'
+    assert pending_tasks(four) == []
+    four.hear(heard('undo', 0.9))
+    assert four.said()[-1] == 'Undone.' and pending_tasks(four) == list(SESSION_REMINDERS)
+
+
+@pytest.mark.parametrize('answer', [EVERYTHING, ALL_OF_THEM, DELETE_ALL_BEFORE, heard('all', 0.8)])
+def test_all_answers_to_which_one_cancel_everything(four, answer):
+    four.hear(heard('Jarvis delete a reminder', 0.9))
+    assert 'Which one should I delete?' in four.said()[-1] and four.assistant.state.pending
+    four.hear(answer)
+    assert four.said()[-1].startswith('All 4 reminders cancelled.')
+    assert pending_tasks(four) == [] and not four.assistant.state.pending
+
+
+def test_which_one_reads_three_then_and_n_more(four):
+    four.hear(heard('Jarvis delete a reminder', 0.9))
+    assert four.said()[-1] == ('I found 4 reminders: call my Mom, today at 3:20 PM; delete my old emails, today at 4:20 PM; '
+                               'call my mom minutes, today at 5:20 PM; and 1 more. Which one should I delete?')
+
+
+def test_which_one_can_still_be_answered_by_name_or_position(four):
+    four.hear(heard('Jarvis delete a reminder', 0.9))
+    four.hear(heard('the stand up one', 0.9))
+    assert 'stand up' not in pending_tasks(four) and len(pending_tasks(four)) == 3
+    four.hear(heard('Jarvis delete a reminder', 0.9))
+    four.hear(heard('the first one', 0.9))
+    assert pending_tasks(four) == ['delete my old emails', 'call my mom minutes']
+
+
+def test_a_name_that_matches_nothing_asks_again_and_a_new_request_is_not_swallowed(four):
+    four.hear(heard('Jarvis delete a reminder', 0.9))
+    four.hear(heard('the dentist', 0.9))
+    assert four.said()[-1].startswith('Sorry, which one?') and len(pending_tasks(four)) == 4
+    four.hear(heard('what time is it', 0.9))
+    assert len(pending_tasks(four)) == 4 and not four.assistant.state.pending
+
+
+def test_a_word_that_names_a_reminder_is_not_all(jarvis):
+    jarvis.services.reminders.create({'task': 'all hands meeting', 'due': NOW.replace(hour=16)})
+    jarvis.services.reminders.create({'task': 'stand up', 'due': NOW.replace(hour=17)})
+    jarvis.hear(heard('Jarvis delete a reminder', 0.9))
+    jarvis.hear(heard('the all hands one', 0.9))
+    assert pending_tasks(jarvis) == ['stand up']
+
+
+def test_cancel_all_reminders_leaves_alarms_and_cancel_all_alarms_leaves_reminders(four):
+    four.services.reminders.create({'task': None, 'due': NOW.replace(hour=22), 'kind': 'alarm'})
+    four.hear(CANCEL_ALL)
+    assert pending_tasks(four) == [None]
+    four.services.reminders.create({'task': 'stand up', 'due': NOW.replace(hour=18)})
+    four.hear(heard('Jarvis delete all alarms', 0.9))
+    assert pending_tasks(four) == ['stand up']
+
+
+def test_cancel_all_timers_and_all_as_the_answer(jarvis):
+    jarvis.hear(START_TEA)
+    jarvis.hear(heard('set a timer for 5 minutes called coffee', 0.81986362))
+    jarvis.hear(heard('Jarvis cancel all timers', 0.9))
+    assert jarvis.timers() == {} and jarvis.said()[-1].startswith('All 2 timers cancelled.')
+    jarvis.hear(heard('undo', 0.9))
+    assert set(jarvis.timers()) == {'Tea', 'Coffee'}
+    jarvis.hear(heard('Jarvis cancel a timer', 0.9))
+    assert 'Which one' in jarvis.said()[-1] and jarvis.assistant.state.pending
+    jarvis.hear(heard('all of them', 0.9))
+    assert jarvis.timers() == {}
+
+
+def test_which_timer_reads_three_then_and_n_more():
+    from core.assistant import _list_timers
+    timers = [SimpleNamespace(label=name, duration_seconds=60) for name in ('Tea', 'Coffee', 'Pasta', 'Rice', 'Eggs')]
+    assert _list_timers(timers[:3]) == 'tea, coffee or pasta'
+    assert _list_timers(timers) == 'tea, coffee, pasta and 2 more'

@@ -120,6 +120,7 @@ PHRASES = {
     'no_reminders': ['No {noun}s.', "You don't have any {noun}s."],
     'reminders_heading': ['{count} {noun}{s}:', 'You have {count} {noun}{s}:'],
     'reminder_deleted': ['Deleted: {label}, {when}.'],
+    'reminders_all_cancelled': ['All {count} {noun}s cancelled.'],
     'reminder_snoozed': ["Snoozed. I'll remind you {when}.", 'Snoozed until {time}.'],
     'reminder_not_found': ["I can't find a {noun} about {target}."],
     'reminder_not_found_plain': ["I can't find that {noun}."],

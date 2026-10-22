@@ -442,7 +442,7 @@ def test_long_choice_lists_are_shortened(services):
     for hour in range(15, 22):
         say(services, f'remind me to stretch at {hour}:00')
     text = say(services, 'delete my stretch reminder').messages[0]
-    assert 'I found 7 reminders' in text and 'and 2 more' in text
+    assert 'I found 7 reminders' in text and 'and 4 more' in text
 
 
 # --- startup summary ------------------------------------------------------------------
