@@ -35,6 +35,8 @@ def describe_command(command, now=None):
         return f"Start a {label.lower() + ' ' if label else ''}timer"
     if intent == 'add_timer_time':
         return f"Add {duration_words(seconds)} to {_the_timer(label)}" if seconds else f"Add time to {_the_timer(label)}"
+    if intent == 'remove_timer_time':
+        return f"Take {duration_words(seconds)} off {_the_timer(label)}" if seconds else f"Take time off {_the_timer(label)}"
     if intent in ('pause_timer', 'resume_timer', 'cancel_timer'):
         verb = {'pause_timer': 'Pause', 'resume_timer': 'Resume', 'cancel_timer': 'Cancel'}[intent]
         return f"{verb} {_the_timer(label)}"

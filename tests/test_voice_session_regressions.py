@@ -143,7 +143,7 @@ def test_logged_delete_acts_at_once_and_can_be_undone(assistant_with_reminder, c
     assistant.process_recognition(ADDRESSED_DEFINITION)  # the misheard turn that started a repair
     assert resolver.call_count == 1
     assistant.process_recognition(command)
-    output.assert_called_with('Deleted: call mom, today at 9 PM.')
+    output.assert_called_with('Deleted: call mom, today at 9 PM. Say undo to bring it back.')
     assert reminders.store.pending() == []
     assert resolver.call_count == 1
     assistant.process_recognition(Recognition('undo', 0.9))
@@ -155,7 +155,7 @@ def test_clear_command_during_a_repair_takes_the_fast_path(assistant_with_remind
     assistant, reminders, resolver, output = assistant_with_reminder
     assistant.process_recognition(ADDRESSED_DEFINITION)
     assistant.process_recognition(Recognition('delete my call mom reminder', 0.95))
-    output.assert_called_with('Deleted: call mom, today at 9 PM.')
+    output.assert_called_with('Deleted: call mom, today at 9 PM. Say undo to bring it back.')
     assert resolver.call_count == 1
     assert not assistant.state.pending
 

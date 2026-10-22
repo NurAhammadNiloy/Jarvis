@@ -16,6 +16,14 @@ _TIMER = r"\b(?:timers?|pomodoros?|countdown)\b"
 _UNIT = r"\b(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b"
 _REMINDER = r"\breminders?\b"
 _WHATS = r"\bwhat(?:['’]s|\s+is|\s+was)"
+_TAKE_OFF = r"\b(?:cancel|remove|delete|take\s+off|take\s+away|subtract|drop|clear|get\s+rid\s+of|undo)\b"
+_REMOVE_TIME = (_TAKE_OFF + r".*\b(?:extra|more|additional|added)\b.*" + _UNIT
+                + r"|" + _TAKE_OFF + r".*" + _UNIT + r".*\b(?:more|extra|additional)\b"
+                + r"|" + _TAKE_OFF + r".*\b(?:extra|additional|added)\s+time\b"
+                + r"|\btake\s+(?:off|away)\b.*" + _UNIT
+                + r"|\btake\b.*" + _UNIT + r".*\b(?:off|away)\b"
+                + r"|\bsubtract\b.*" + _UNIT
+                + r"|\b(?:remove|delete|cut)\s+(?:an?\s+|\w+\s+)?\d+[\s-]*" + _UNIT + r"(?![\s-]*(?:timers?|countdown)\b)")
 
 RULES = (
     # intent              pattern (case-insensitive)
@@ -28,6 +36,9 @@ RULES = (
                           + r"|" + _LEAD + r"(?:set|create|add|make)\s+(?:(?:a|an|another|new)\s+)*reminder\b"),
     # Alarm before timers: "set an alarm for 30 minutes" is not a timer.
     ('alarm',             r"\balarms?\b|\bwake\s+me\b|" + _LEAD + r"wake\s+up\b"),
+    # Taking time off a timer ("cancel that extra 5 minutes", "take off 5 minutes") is not
+    # cancelling the timer, so it comes before the cancel rules.
+    ('remove_timer_time', _REMOVE_TIME),
     # Timers: cancel-all before cancel, resume before pause (unpause), and
     # every operation before the generic start rule.
     ('cancel_all_timers', r"\b(?:cancel|stop|delete|remove|clear|end)\b.*\ball\b.*" + _TIMER),
@@ -83,7 +94,7 @@ FAMILIES = {
     'create_reminder': 'reminder', 'delete_reminder': 'reminder', 'snooze_reminder': 'reminder',
     'start_timer': 'timer', 'pause_timer': 'timer', 'resume_timer': 'timer',
     'cancel_timer': 'timer', 'cancel_all_timers': 'timer', 'timer_status': 'timer',
-    'add_timer_time': 'timer', 'pomodoro': 'timer',
+    'add_timer_time': 'timer', 'remove_timer_time': 'timer', 'pomodoro': 'timer',
 }
 
 

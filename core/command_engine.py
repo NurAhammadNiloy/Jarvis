@@ -19,7 +19,8 @@ _ALARM_LIST = re.compile(r"^\W*(?:what|which|list|show|tell|read|check|any|do\s+
 TIMER_ACTIONS = {
     "start_timer": "set", "pause_timer": "pause", "resume_timer": "resume",
     "cancel_timer": "cancel", "cancel_all_timers": "cancel_all",
-    "timer_status": "status", "add_timer_time": "add_time", "pomodoro": "pomodoro",
+    "timer_status": "status", "add_timer_time": "add_time", "remove_timer_time": "remove_time",
+    "pomodoro": "pomodoro",
 }
 
 
@@ -46,6 +47,11 @@ def spoken_date(moment, today):
     """'Thursday, October 22' (with the year only when it is not this year)."""
     text = f"{moment:%A}, {moment:%B} {moment.day}"
     return text if moment.year == today.year else f"{text}, {moment.year}"
+
+
+# "don't cancel the tea timer", "not the timer": never cancels anything.
+_DONT_CANCEL = re.compile(r"\b(?:do\s*n['’]?t|do\s+not|never|not)\s+(?:to\s+)?(?:cancel|stop|delete|remove|end|kill)\b"
+                          r"|\bnot\s+the\s+(?:\w+\s+){0,2}timers?\b", re.IGNORECASE)
 
 
 def understand_query(query, services, default_location=DEFAULT_LOCATION):
@@ -165,6 +171,8 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         if not services.open_url("https://www.google.com"):
             return reply(say("no_browser"), status="error")
         return reply(say("opening_google"))
+    if intent in ("cancel_timer", "cancel_all_timers") and _DONT_CANCEL.search(query):
+        return reply(say("wont_cancel"))
     if intent == "timer" or intent in TIMER_ACTIONS:
         action = args['action']
         seconds = (args.get('duration') or (None, None))[0]
@@ -173,6 +181,8 @@ boundary. Clock and response choice can be fixed for deterministic tests.
                          error="invalid_duration")
         if action == "add_time" and not seconds:
             return reply(say("add_how_much"))
+        if action == "remove_time" and not seconds:
+            return reply(say("remove_how_much"))
         return action_reply(services.timer_action(action, query, args))
     if intent == "thank":
         return reply(services.thanks(choose))

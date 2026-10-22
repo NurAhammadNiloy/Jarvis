@@ -3,6 +3,8 @@
 Replace this object in tests. Audio is only used when VoiceNotifications is
 explicitly supplied. Reuse an instance to preserve its active timer state.
 """
+import re
+
 from core.command_output import TextNotifications
 from core.command_result import ActionResult
 
@@ -106,12 +108,14 @@ class CommandServices:
             succeeded = status is not None
         elif action == "add_time":
             succeeded = manager.add_time(info["duration"][0], **kwargs)
+        elif action == "remove_time":
+            succeeded = manager.remove_time(info["duration"][0], **kwargs)
         elif action in ("cancel", "pause", "resume"):
             succeeded = getattr(manager, action + "_timer")(**kwargs)
         else:
             succeeded = manager.create_timer(query, label=kwargs['label'], respond=messages.append) is not None
         undo = self._timer_undo(action, info, manager) if succeeded else None
-        if not succeeded and messages and messages[-1].rstrip().endswith('Which one should I ' + action + '?'):
+        if not succeeded and messages and re.search(r'Which one should I [\w ]+\?$', messages[-1].rstrip()):
             # "You have multiple timers. Which one should I cancel?": the answer picks one.
             return ActionResult(tuple(messages), False, pending=True, pending_action='choose_timer')
         return ActionResult(tuple(messages), bool(succeeded), undo=undo)
@@ -133,6 +137,9 @@ class CommandServices:
         if action == 'add_time':
             seconds = info['duration'][0]
             return lambda: manager.add_time(-seconds, timer_id=timer.id, respond=quiet)
+        if action == 'remove_time':
+            seconds = info['duration'][0]
+            return lambda: manager.add_time(seconds, timer_id=timer.id, respond=quiet)
         if action in ('cancel', 'cancel_all'):
             return lambda: manager.restore_timers(affected)
         return None

@@ -807,6 +807,39 @@ class SmartTimerManager:
         
         return True
     
+    def remove_time(self, seconds: int, timer_id: Optional[int] = None, label: Optional[str] = None, respond=synthesize_speech) -> bool:
+        """Take time off a timer (never cancels it: if that is more than what is left, nothing changes)."""
+        timer = self._find_timer(timer_id, label)
+
+        if not timer and (timer_id or label):
+            respond(say('timer_not_found', what=f"a {label.lower()} timer" if label else 'that timer'))
+            return False
+
+        if not timer:
+            with self._lock:
+                if len(self.timers) == 1:
+                    timer = list(self.timers.values())[0]
+                elif len(self.timers) > 1:
+                    respond(say('timer_which', verb='take time off'))
+                    return False
+                else:
+                    respond(say('no_timers'))
+                    return False
+
+        if timer.remaining_seconds <= seconds:
+            respond(say('remove_too_much', left=self._format_remaining(timer.remaining_seconds),
+                        name=(timer.label or 'the timer').lower()))
+            return False
+
+        self.last_affected = [(timer, timer.remaining_seconds, timer.state)]
+        timer.duration_seconds -= seconds
+        removed_str = self._format_duration(seconds)
+        if timer.label:
+            respond(say('time_removed', duration=removed_str, name=timer.label.lower()))
+        else:
+            respond(say('time_removed_plain', duration=removed_str))
+        return True
+
     def restore_timers(self, snapshots):
         """Undo a cancel: put timers back with the time they had left."""
         for old, remaining, state in snapshots:

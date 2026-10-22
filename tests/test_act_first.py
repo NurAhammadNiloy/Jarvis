@@ -213,7 +213,7 @@ def test_undo_window_is_60_seconds(jarvis):
 
 
 def test_some_actions_cannot_be_undone(jarvis):
-    jarvis.assistant._last_action = (None, 0, 'youtube')
+    jarvis.assistant._last_action = (None, 0, 'youtube', 'open google')
     jarvis.hear(heard('undo', 0.9))
     assert jarvis.said()[-1] == "Sorry, I can't undo that."
 

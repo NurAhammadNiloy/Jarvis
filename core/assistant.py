@@ -55,7 +55,8 @@ class Assistant:
         self._recognition_failure_prompted = False
         from config.settings import UNDO_WINDOW_SECONDS
         self.undo_window = UNDO_WINDOW_SECONDS
-        self._last_action = None  # (undo function or None, when, intent) of the last change
+        self._last_action = None  # (undo function or None, when, intent, query) of the last change
+        self._undo_hint_given = False  # "Say undo to bring it back." is said once per session
 
     def process_recognition(self, recognition, passive=False):
         """Only final, accepted transcripts may reach execute_query."""
@@ -160,6 +161,9 @@ class Assistant:
             return False
         if _UNDO.match(text) and not recognition.error:
             return self._undo_last(text)
+        if (not recognition.error and not recognition.truncated and route(text).intent == 'remove_timer_time'
+                and self._takes_back_added_time(text)):
+            return self._undo_last(text)  # "cancel that extra 5 minutes" right after adding them
         decision = self.gate.assess(recognition, text=text)
         if (self.dialogue is not None and decision.kind == 'clarify' and decision.reason in ('wording', 'meaning')
                 and route(text).intent == 'chat'):
@@ -402,7 +406,7 @@ class Assistant:
     def _complete(self, command):
         if not self._understood(command) or command.intent == 'chat':
             return False
-        if command.intent in ('start_timer', 'add_timer_time'):
+        if command.intent in ('start_timer', 'add_timer_time', 'remove_timer_time'):
             return bool((command.arguments.get('duration') or (None,))[0])
         return True
 
@@ -455,6 +459,18 @@ class Assistant:
         second_text = self._describe(second)
         return f"{self._describe(first)}, or {second_text[:1].lower() + second_text[1:]}?"
 
+    def _takes_back_added_time(self, text):
+        """True when this asks to remove time the last action just added (the same amount
+        or none given, and the same timer): that is an undo, not a subtraction."""
+        last = self._last_action
+        if last is None or last[0] is None or last[2] != 'add_timer_time' or self.clock() - last[1] > self.undo_window:
+            return False
+        from core.smart_timer import extract_timer_info
+        added, asked = extract_timer_info(last[3]), extract_timer_info(text)
+        if asked['duration'][0] and asked['duration'][0] != added['duration'][0]:
+            return False
+        return not asked['label'] or (added['label'] or '').lower() == asked['label'].lower()
+
     def _undo_last(self, text):
         record('voice_decision', decision='undo', text=text)
         self.active_conversation = True
@@ -464,7 +480,7 @@ class Assistant:
         if last is None or self.clock() - last[1] > self.undo_window:
             self.output(say('nothing_to_undo'))
             return True
-        undo, _, intent = last
+        undo, _, intent, _ = last
         if undo is None:
             self.output(say('cannot_undo'))
             return True
@@ -535,9 +551,13 @@ class Assistant:
                pending_action=result.pending_action, duration_ms=round((time.monotonic() - started) * 1000))
         undo = result.data.get('undo') if hasattr(result.data, 'get') else None
         if undo is not None:
-            self._last_action = (undo, self.clock(), result.intent)
+            self._last_action = (undo, self.clock(), result.intent, query)
+            if _is_removal(result.intent, query) and not self._undo_hint_given and result.messages:
+                # The first cancel or delete of the session says how to take it back.
+                self._undo_hint_given = True
+                result = replace(result, messages=result.messages[:-1] + (f'{result.messages[-1]} {say("undo_hint")}',))
         elif result.status == 'handled' and result.intent in _NOT_UNDOABLE:
-            self._last_action = (None, self.clock(), result.intent)
+            self._last_action = (None, self.clock(), result.intent, query)
         if result.pending_action == 'choose_timer':
             self.state.await_slot(result.intent, 'timer', query, result.messages[-1],
                                   Command(result.intent, query, result.data['args']))
@@ -585,6 +605,15 @@ _UNDO = re.compile(
 _NEGATIONS = {'not', 'no', 'never', "don't", 'don’t', "can't", 'cannot', "won't", "didn't"}
 # Opening a page or playing a video cannot be taken back.
 _NOT_UNDOABLE = {'youtube', 'google'}
+# Cancelling or deleting: the first one in a session also says how to undo it.
+_REMOVALS = {'cancel_timer', 'cancel_all_timers', 'delete_reminder'}
+
+
+def _is_removal(intent, query):
+    return intent in _REMOVALS or intent == 'alarm' and bool(_ALARM_REMOVAL.search(query))
+
+
+_ALARM_REMOVAL = re.compile(r"\b(?:cancel|delete|remove|clear|drop)\b", re.IGNORECASE)
 _WAKE_LIKE = {'jarvis', 'yarvis', 'jervis', 'javis'}
 
 
@@ -600,7 +629,7 @@ def _addressed(text):
 def _signature(command):
     """What the action is: the intent plus the amount or time that matters."""
     args = command.arguments
-    if command.intent in ('start_timer', 'add_timer_time'):
+    if command.intent in ('start_timer', 'add_timer_time', 'remove_timer_time'):
         return command.intent, (args.get('duration') or (None,))[0]
     if command.intent in ('create_reminder', 'alarm') and args.get('operation', 'create') == 'create':
         due = args.get('due')
