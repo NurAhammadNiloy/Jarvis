@@ -10,7 +10,8 @@ A sophisticated voice-activated AI assistant inspired by Iron Man's J.A.R.V.I.S.
 ## ✨ Features
 
 ### Voice Interaction
-- **Wake Word Detection** - Requires a leading "Jarvis" (checked on the cloud transcript; there is no on-device wake-word detector yet)
+- **Wake Word Detection** - Say **"Hey Jarvis"**. It is detected on your computer (openWakeWord, on the CPU), so nothing is sent to cloud speech recognition until you say it. Plain "Jarvis" is not used: the model was trained on "Hey Jarvis". Within a conversation (30 s after Jarvis answers, or while it waits for your answer) no wake word is needed.
+- **Headset by default** - With wired headphones and a microphone you can answer or interrupt at any time, also while Jarvis is speaking (`ECHO_MODE` in `config/settings.py`; `"speakers"` for loudspeakers).
 - **Voice Activity Detection (VAD)** - Continuous capture with 1.4-second silence endpointing
 - **Speech Recognition** - Google Speech Recognition with preserved transcripts and clarification for uncertain commands
 - **Interruptible Speech** - Queued Google Cloud TTS and cancellable PCM playback; listening continues during responses
@@ -166,20 +167,33 @@ python main.py
 
 ### How It Works
 1. Jarvis starts the reminder scheduler and announces any reminders missed while it was off
-2. Jarvis listens passively for the wake word **"Jarvis"**
-3. Once activated, speak your command
+2. Jarvis listens passively for the wake word **"Hey Jarvis"**
+3. Say your command after it, in the same breath or after Jarvis answers
 4. Jarvis processes and responds with synthesized speech
-5. Conversation stays active for 2 minutes before returning to passive mode
+5. The conversation stays active for 30 seconds after each reply, then Jarvis returns to passive mode
+
+Measure the wake word in your room with `tools/measure_wake_word.py`, and tune it to your
+voice: record with `tools/record_voice.py` (about 9 minutes), then train with
+`tools/train_wake_verifier.py` (about a minute). Recordings stay in `data/voice/`.
+The measurement saves a short clip of every background moment scoring above 0.20
+(`data/voice/background_peaks/`, with times in `peaks.jsonl`; the next training learns them
+as "not the wake word") and reports the mic's noise
+floor and clipping; `tools/record_voice.py --check` checks the recordings for both.
+Your situations are recorded and measured one at a time: `record_voice.py --only background
+--scenario video` (also `quiet`, `talking`, `household`, or your own name) adds 90 s of that
+sound as negatives, `measure_wake_word.py --scenario video` measures it, and
+`measure_wake_word.py --summary` prints one table of the latest run of every scenario
+(`data/voice/measurements.jsonl`). Training reports false wake-ups per scenario.
 
 ### Example Commands
 ```
-"Jarvis, what's the weather like?"
-"Jarvis, remind me to take a break in 30 minutes"
-"Jarvis, what are my reminders?"
-"Jarvis, set an alarm for 7am"
-"Jarvis, play relaxing music on YouTube"
-"Jarvis, what time is it?"
-"Jarvis, tell me a joke"
+"Hey Jarvis, what's the weather like?"
+"Hey Jarvis, remind me to take a break in 30 minutes"
+"Hey Jarvis, what are my reminders?"
+"Hey Jarvis, set an alarm for 7am"
+"Hey Jarvis, play relaxing music on YouTube"
+"Hey Jarvis, what time is it?"
+"Hey Jarvis, tell me a joke"
 ```
 
 ---

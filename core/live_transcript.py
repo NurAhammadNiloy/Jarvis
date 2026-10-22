@@ -54,6 +54,7 @@ class _Turn:
     reply_id: object = None
     reply_started_at: object = None
     window: str = ''
+    wake: object = None    # on-device wake-word score
     started: bool = False
     truncated: bool = False
     expected_reply: object = None  # what the assistant said it is replying
@@ -85,9 +86,14 @@ class LiveTranscript:
             self._stt_ms = f.get('duration_ms')
         elif event == 'recognition' and not f.get('partial'):
             uid = f.get('uid')
+            previous = self._turns.get(uid)
             self._turns[uid] = _Turn(uid, f.get('text') or '', f.get('confidence'), f.get('error'),
-                                     self._stt_ms, self._utterance_ended)
+                                     self._stt_ms if previous is None else previous.stt_ms,
+                                     self._utterance_ended if previous is None else previous.ended_at,
+                                     wake=f.get('wake_score'))
             self._stt_ms = None
+        elif event == 'wake_detected':
+            self._print(f'Wake word: "{f.get("keyword")}"  score {f.get("score", 0):.2f}')
         elif event == 'voice_filter':
             turn = self._turns.get(f.get('uid'))
             if turn is not None:
@@ -177,11 +183,14 @@ class LiveTranscript:
 
     def _print_turn(self, turn, status=None):
         self._turns.pop(turn.uid, None)
-        status = status or turn.status or ('heard' if turn.text else 'not understood')
+        status = status or turn.status or ('heard' if turn.text or turn.wake is not None else 'not understood')
         heard = self._short(turn.text) or ('(incomplete recording)' if turn.truncated else
-                                           _NO_WORDS.get(turn.error, f'({turn.error})' if turn.error else '(no words)'))
+                                           _NO_WORDS.get(turn.error, f'({turn.error})' if turn.error else
+                                                         '(wake word only)' if turn.wake is not None else '(no words)'))
         confidence = f"{turn.confidence:.2f}" if isinstance(turn.confidence, (int, float)) else '-'
         parts = [f'You ({status}): "{heard}"  conf {confidence}']
+        if isinstance(turn.wake, (int, float)):
+            parts[0] += f'  wake {turn.wake:.2f}'
         if status == 'heard' and turn.text and turn.path != 'wake word':
             addressed = strip_wake_word(turn.text)
             parts.append(f"intent {turn.intent or route(addressed if addressed is not None else turn.text).intent}")

@@ -2,6 +2,7 @@
 from collections import deque
 from dataclasses import dataclass
 import queue
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,8 @@ class VoiceConfig:
     # Speech after Jarvis stopped that marks an overlapping utterance as yours.
     after_playback_speech_ms: int = 300
     # settings.ECHO_MODE: 'speakers' discards audio while Jarvis is audible and
-    # for playback_tail_ms after, except speech that starts with "Jarvis" or "stop".
+    # for playback_tail_ms after, except speech that starts with "Jarvis" or "stop";
+    # 'headset' keeps everything, because the microphone cannot hear Jarvis.
     echo_mode: str = 'speakers'
     playback_tail_ms: int = 300
 
@@ -47,6 +49,10 @@ class AudioUtterance:
     # Speakers mode: the audio after Jarvis stopped plus the 0.3 s tail, when you
     # kept speaking that long (e.g. "yes" right after "Shall I do that?").
     after_playback_pcm: bytes = b''
+    # The on-device wake word fired in this utterance: its score, and where in `pcm`
+    # the speech after it starts.
+    wake_score: Optional[float] = None
+    wake_offset: int = 0
 
 
 class Endpointer:

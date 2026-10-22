@@ -292,9 +292,11 @@ def speakers_listener(*results, echo_mode='speakers'):
     return listener, recognize, speech
 
 
-def test_echo_mode_setting_defaults_to_speakers():
+def test_echo_mode_setting_defaults_to_headset():
+    # Wired headphones with a mic day to day (docs/DECISIONS.md, 10). VoiceConfig's own
+    # default stays the cautious one; the application passes the setting.
     from config import settings
-    assert settings.ECHO_MODE == 'speakers' and VoiceConfig().echo_mode == 'speakers'
+    assert settings.ECHO_MODE == 'headset' and VoiceConfig().echo_mode == 'speakers'
     with pytest.raises(ValueError):
         VoiceConfig(echo_mode='loud')
 

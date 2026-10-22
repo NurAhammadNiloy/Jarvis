@@ -32,6 +32,8 @@ class Assistant:
             from core.speech_synthesis import synthesize_speech
             output = synthesize_speech
         self.listener, self.speech = listener, speech
+        # Passive and not waiting for an answer: the listener needs the on-device wake word.
+        listener.wake_required = lambda: not self.active_conversation and not self.state.pending
         self._turn_uid = None
         self._asked_question = False
 
@@ -96,18 +98,29 @@ class Assistant:
             if self.active_conversation:
                 self.last_active_time = self.clock()
             return False
+        if (recognition.wake_heard is False and passive and not self.state.pending
+                and route(recognition.text).intent == 'chat'):
+            # The on-device detector fired, but the transcript has no "Jarvis" (nor a word it
+            # is misheard as) and no command: most likely a false wake (a video, someone else).
+            # It costs one recognition, never a spoken reply, and Jarvis stays passive.
+            record('voice_decision', decision='ignore', reason='wake_not_confirmed', text=recognition.text)
+            return False
         addressed = strip_wake_word(recognition.text)
+        if addressed is None and recognition.wake_score is not None:
+            # The on-device detector heard the wake word; the text is what followed it.
+            addressed = recognition.text
         if passive and addressed is None:
             record('voice_decision', decision='ignore', reason='no_wake_word', text=recognition.text)
             return False
         text = addressed if addressed is not None else recognition.text
         # Wake-only speech is an attention request in either conversation mode.
         # Repetitions are not a command, and must never reach the domain router.
-        wake_only = bool(words(recognition.text)) and (set(words(recognition.text)) == {'jarvis'} or
-                                                         addressed is not None and not words(addressed))
+        wake_only = (bool(words(recognition.text)) or recognition.wake_score is not None) and (
+            set(words(recognition.text)) == {'jarvis'} or addressed is not None and not words(addressed))
         if wake_only and not recognition.error and not recognition.truncated:
             # This lower threshold only authorizes a greeting, never an action.
-            if recognition.confidence is not None and recognition.confidence < 0.5:
+            if (recognition.wake_score is None and recognition.confidence is not None
+                    and recognition.confidence < 0.5):
                 record('voice_decision', decision='ignore', reason='weak_wake_word', text=text)
                 return False
             record('voice_decision', decision='wake', text=recognition.text)
@@ -622,7 +635,7 @@ class Assistant:
     # --- loops ------------------------------------------------------------------
 
     def wait_for_wake_word(self):
-        print("[Passive mode]")
+        print("[Passive mode] " + say('wake_hint'))
         while True:
             if self.process_recognition(self.listener.listen(timeout=1), passive=True):
                 return

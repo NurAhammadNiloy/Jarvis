@@ -4,3 +4,5 @@ __pycache__
 env/
 logs/
 data/
+# Downloaded model files (wake word): fetched on first start
+models/

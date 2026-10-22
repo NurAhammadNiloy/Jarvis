@@ -24,6 +24,12 @@ class Recognition:
     playback_id: Optional[int] = None
     playback_text: str = ""
     captured_at: Optional[float] = None
+    # The on-device detector heard the wake word at the start of this utterance (its
+    # score). The text is then addressed to Jarvis even if it lacks "Jarvis".
+    wake_score: Optional[float] = None
+    # Only when wake_score is set: whether the cloud transcript of the utterance has the
+    # wake word, or a word it is misheard as (wake_like); None when unknown (no transcript).
+    wake_heard: Optional[bool] = None
     # Identifies one heard utterance in the log (kept by dataclasses.replace).
     uid: int = field(default_factory=itertools.count(1).__next__, compare=False)
 
@@ -99,6 +105,19 @@ def is_echo(text, playback_text):
 
 
 _WAKE_VARIANTS = {'jarvis', 'yarvis', 'jervis', 'javis'}
+# What the cloud recognizer also made of your "Jarvis" (logs/conversation.jsonl, Oct 2026).
+_WAKE_MISHEARD = {'service', 'nervous', 'jersey', 'jarred', 'travis'}
+
+
+def wake_like(text):
+    """Whether a transcript has the wake word, or a word it is often misheard as."""
+    from difflib import SequenceMatcher
+    for word in words(text):
+        word = re.sub(r"([a-z])\1+", r"\1", re.split(r"['’]", word)[0])
+        if (word in _WAKE_VARIANTS or word in _WAKE_MISHEARD
+                or len(word) >= 4 and SequenceMatcher(None, word, 'jarvis').ratio() >= 0.7):
+            return True
+    return False
 
 
 def _comparable(text):
@@ -142,17 +161,22 @@ def alternatives_conflict(result, important=False):
     return conflict_reason(result, important) is not None
 
 
-def can_interrupt(result, stop_confidence=0.65):
+def can_interrupt(result, stop_confidence=0.65, any_speech=False):
     """Partial recognition may only cancel speech, never authorize an action.
-    A short stop needs `stop_confidence` (0.35 over loudspeakers, see ECHO_MODE)."""
+    A short stop needs `stop_confidence` (0.35 over loudspeakers, see ECHO_MODE).
+    `any_speech` (headset mode, where the microphone cannot hear Jarvis): whatever you
+    clearly say interrupts, except "don't stop"."""
     if result.error or result.truncated or not result.text:
         return False
-    if is_echo(result.text, result.playback_text):
+    if not any_speech and is_echo(result.text, result.playback_text):
         return False
     if stop_heard(result, stop_confidence):
         return True
     if result.confidence is not None and result.confidence < 0.65:
         return False
+    if any_speech:
+        tokens = set(words(result.text))
+        return not (tokens & NEGATION and tokens & {'stop', 'talking', 'speaking', 'going'})
     if alternatives_conflict(result, important=True):
         return False
     if set(words(result.text)) & NEGATION:
