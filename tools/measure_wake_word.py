@@ -14,7 +14,8 @@ above the threshold.
 
 Every background moment scoring above 0.20 is logged with its time and saved as a short
 clip (2 s before, 1 s after) in data/voice/background_peaks/, so you can listen to what
-caused it. Nothing else is saved, and nothing is sent anywhere. The results also show the
+caused it; the next training (tools/train_wake_verifier.py) learns them as "not the wake
+word" (other voices saying "Jarvis" included). Nothing else is saved, and nothing is sent anywhere. The results also show the
 microphone's noise floor, clipping and lost frames.
 """
 import argparse

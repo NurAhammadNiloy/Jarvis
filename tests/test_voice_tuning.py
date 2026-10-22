@@ -212,3 +212,23 @@ def test_check_reports_noise_and_clipping_per_part(tmp_path):
     assert lines[2].startswith('speech: 1 clips') and 'noise floor is high' in lines[3]
     assert lines[4:] == ['background: no recordings', 'commands: no recordings']
     assert 'CLIPPED (50 samples)' in record.clip_note(loud.tobytes()) and record.clip_note(quiet.tobytes()) == ''
+
+
+def test_training_uses_commands_and_saved_background_peaks_as_negatives(tmp_path, monkeypatch, capsys):
+    for part, count in (('wake', 5), ('speech', 1), ('background', 1), ('commands', 2), ('background_peaks', 2)):
+        for i in range(count):
+            record.write_wav(tmp_path / part / f'{part}_{i:03d}.wav', SILENCE)
+    seen = {}
+
+    def fake_train(positives, negatives, output, *, peak_clips=(), threshold=0.5):
+        seen.update(positives=positives, negatives=negatives, peaks=peak_clips)
+        return {'positive': {'a.wav': [[(0.9, 0.9)]]}, 'negative': {'b.wav': [[(0.1, 0.1)]]}, 'peaks': [],
+                'threshold': threshold}
+    monkeypatch.setattr(wake_word, 'VOICE_DIR', tmp_path)
+    monkeypatch.setattr(wake_word, 'train_verifier', fake_train)
+    monkeypatch.setattr('sys.argv', ['train_wake_verifier.py'])
+    assert train.main() == 0
+    assert len(seen['positives']) == 5
+    assert sorted(p.parent.name for p in seen['negatives']) == ['background', 'commands', 'commands', 'speech']
+    assert [p.parent.name for p in seen['peaks']] == ['background_peaks'] * 2
+    assert 'and 2 saved background peaks' in capsys.readouterr().out

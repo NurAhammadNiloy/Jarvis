@@ -3,7 +3,10 @@
     env\\Scripts\\python.exe -B tools\\train_wake_verifier.py        (about 1 minute)
 
 Trains openWakeWord's personal verifier: "Hey Jarvis" clips (data/voice/wake/) against
-your other speech and background sound (data/voice/speech/, data/voice/background/).
+your other speech and background sound (data/voice/speech/, data/voice/background/,
+data/voice/commands/), and every background moment the measurement saved because it
+scored high (data/voice/background_peaks/: false wake-ups and near-misses, including other
+voices saying "Jarvis"). Delete a peak clip if it is really you saying "Hey Jarvis".
 First every clip is scored by a verifier that was trained without it, so the numbers
 show how it does on new attempts; then the final verifier is trained on everything and
 saved as data/voice/hey_jarvis_verifier.pkl. Jarvis uses it from the next start
@@ -68,12 +71,15 @@ def main():
     parser.add_argument('--threshold', type=float, default=WAKE_WORD_THRESHOLD)
     args = parser.parse_args()
     positives = sorted((VOICE_DIR / 'wake').glob('*.wav'))
-    negatives = sorted((VOICE_DIR / 'speech').glob('*.wav')) + sorted((VOICE_DIR / 'background').glob('*.wav'))
+    negatives = [clip for part in ('speech', 'background', 'commands') for clip in sorted((VOICE_DIR / part).glob('*.wav'))]
+    peaks = sorted((VOICE_DIR / 'background_peaks').glob('*.wav'))
     if len(positives) < 5 or not negatives:
         print(f'Found {len(positives)} "Hey Jarvis" clips and {len(negatives)} other clips in {VOICE_DIR}.')
         print('Record them first: env\\Scripts\\python.exe -B tools\\record_voice.py')
         return 1
-    report = train_verifier(positives, negatives, VERIFIER_PATH, threshold=args.threshold)
+    print(f'Using {len(positives)} "Hey Jarvis" clips, {len(negatives)} clips of other speech and sound, '
+          f'and {len(peaks)} saved background peaks.')
+    report = train_verifier(positives, negatives, VERIFIER_PATH, peak_clips=peaks, threshold=args.threshold)
     print()
     for line in describe(report, WAKE_WORD_VERIFIER_GATE, args.threshold):
         print(line)

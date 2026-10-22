@@ -176,7 +176,8 @@ Measure the wake word in your room with `tools/measure_wake_word.py`, and tune i
 voice: record with `tools/record_voice.py` (about 9 minutes), then train with
 `tools/train_wake_verifier.py` (about a minute). Recordings stay in `data/voice/`.
 The measurement saves a short clip of every background moment scoring above 0.20
-(`data/voice/background_peaks/`, with times in `peaks.jsonl`) and reports the mic's noise
+(`data/voice/background_peaks/`, with times in `peaks.jsonl`; the next training learns them
+as "not the wake word") and reports the mic's noise
 floor and clipping; `tools/record_voice.py --check` checks the recordings for both.
 
 ### Example Commands
