@@ -11,13 +11,17 @@ MAX_HISTORY = 10  # Keep last 10 exchanges for context
 
 
 def resolve_dialogue(context):
-    """One bounded model call for conversation and request repair; no tools."""
+    """One bounded model call for conversation and request repair; no tools.
+    context['answer_length'] is 'long' when the user asked for detail."""
     import json
+    long_answer = context.get('answer_length') == 'long'
     response = openai.ChatCompletion.create(
-        model='gpt-4o', temperature=0, max_tokens=250, request_timeout=8,
+        model='gpt-4o', temperature=0, max_tokens=450 if long_answer else 250,
+        request_timeout=NETWORK_TIMEOUT_SECONDS if long_answer else 8,
         messages=[{'role': 'system', 'content': (
-            'You are Jarvis in a spoken conversation. Reply naturally in one short sentence, '
-            'without roleplay filler. Use the supplied recent turns to understand follow-ups, '
+            'You are Jarvis in a spoken conversation. Reply naturally and briefly, in one or two short '
+            'sentences; but when answer_length is "long" the user asked for detail, so answer fully in '
+            'up to six sentences of plain speech (no lists or headings). Avoid roleplay filler. Use the supplied recent turns to understand follow-ups, '
             'corrections, spelling and topic changes. Recognition text is fallible: alternatives '
             'are possibilities, not user statements. Preserve agreed details. Ask ONE targeted '
             'question about the uncertain or missing detail, not for repetition of the full request. '

@@ -4,11 +4,25 @@ What is pending (a proposal to confirm, a missing time) lives in
 core.conversation_state, which the assistant checks before anything reaches here.
 """
 from dataclasses import dataclass
+import re
 import time
 
 from core.conversation_state import answer_kind
 from core.voice_policy import ConfidenceGate, Recognition
 from core.intent_classifier import FAMILIES, route
+
+
+# Asking for detail allows a longer answer (up to ~6 sentences); otherwise short.
+_DETAIL = re.compile(
+    r"\b(?:tell\s+me\s+(?:all\s+|more\s+|everything\s+)?about|tell\s+me\s+more|explain|describe|elaborate"
+    r"|(?:full|whole|entire)\s+story|in\s+(?:more\s+|great\s+|full\s+)?detail|detailed|history\s+of"
+    r"|everything\s+(?:about|on))\b", re.IGNORECASE)
+_REPLY_LIMIT = {'short': 500, 'long': 1500}  # characters
+
+
+def answer_length(text):
+    """'long' when the user asks for detail ("tell me about", "explain", "full story")."""
+    return 'long' if _DETAIL.search(text) else 'short'
 
 
 @dataclass(frozen=True)
@@ -77,14 +91,15 @@ class Dialogue:
         # can only turn it into a proposal that needs its own confirmation.
         try:
             self.model_called = True
+            length = answer_length(recognition.text)
             result = self.resolve({'history': list(self.history), 'pending_query': pending,
-                'reason': reason, 'recognition': {'text': recognition.text,
+                'reason': reason, 'answer_length': length, 'recognition': {'text': recognition.text,
                     'confidence': recognition.confidence,
                     'alternatives': [a.text for a in recognition.alternatives]}})
             if not isinstance(result, dict) or set(result) != {'reply', 'query'}:
                 raise ValueError('Invalid dialogue response')
             reply, query = result['reply'], result['query']
-            if not isinstance(reply, str) or not 0 < len(reply) <= 500:
+            if not isinstance(reply, str) or not 0 < len(reply) <= _REPLY_LIMIT[length]:
                 raise ValueError('Invalid reply')
             if query is not None and (not isinstance(query, str) or not 0 < len(query) <= 400):
                 raise ValueError('Invalid proposal')

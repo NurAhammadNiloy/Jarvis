@@ -246,8 +246,8 @@ class SpeechController:
                         playback_started = True
                     record('playback_chunk_started', playback_id=job.id, text=text)
                     self.player.play(clip, job.cancelled)
-                    with self._condition:
-                        self._audible = False
+                    # Stay audible until the last chunk: while the next chunk is being
+                    # synthesized, echo filtering and stop-by-voice must still apply.
             except Exception as exc:
                 job.error = exc
                 logger.error('Speech output failed (%s)', type(exc).__name__)
