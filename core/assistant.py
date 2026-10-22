@@ -6,8 +6,8 @@ import time
 from core.command_engine import execute_query, run_command, understand_query
 from core.command_output import VoiceNotifications, deliver_result
 from core.command_services import CommandServices
-from core.conversation_state import ConversationState, heard_as, means_stop
-from core.voice_policy import ConfidenceGate, strip_wake_word, words
+from core.conversation_state import ConversationState, stop_threshold
+from core.voice_policy import ConfidenceGate, stop_heard, strip_wake_word, words
 from core.conversation_log import record
 from core.intent_classifier import route
 
@@ -111,8 +111,8 @@ class Assistant:
         handled = self._answer_pending(recognition, text)
         if handled is not None:
             return handled
-        if heard_as(recognition, means_stop):
-            # 'Jarvis stop' with alternatives 'stopped' / 'stahp' is still stop.
+        if stop_heard(recognition, stop_threshold(recognition)):
+            # 'Jarvis stop Jarvis', 'Genesis stop' (0.40, heard over Jarvis): stop.
             record('voice_decision', decision='stop', text=text, playback_id=recognition.playback_id)
             self.speech.stop(expected_id=recognition.playback_id)
             return True
@@ -190,8 +190,7 @@ class Assistant:
         self.active_conversation = True
         self.last_active_time = self.clock()
         self.speech.stop()
-        # The answer completes an action, so it is held to the action threshold.
-        if self.gate.assess(recognition, text=text, force_important=True).kind != 'accept':
+        if not self._clear_slot_answer(recognition, state, command):
             self.output("I'm not sure I heard that. " + state.prompt)
         elif question:  # progress, e.g. "Did you mean 6 a.m. or p.m.?"
             self.state.await_slot(state.intent, state.slot, completed, question)
@@ -199,6 +198,21 @@ class Assistant:
         else:
             self.state.clear('filled')
             self._run(command)
+        return True
+
+    def _clear_slot_answer(self, recognition, state, command):
+        """An answer that completes the request is enough from 0.5 ('in 2 minutes'
+        0.71), unless a likely alternative completes it differently ('in 3 minutes',
+        'at 7 pm' for 'at 7 am')."""
+        if recognition.confidence is None or recognition.confidence < 0.5:
+            return False
+        due = command.arguments.get('due')
+        for alternative in recognition.alternatives:
+            if alternative.confidence is not None and alternative.confidence < 0.5:
+                continue
+            other = self._understand(f'{state.query} {alternative.text}')
+            if other is not None and other.arguments.get('due') not in (None, due):
+                return False
         return True
 
     def _understand(self, query):

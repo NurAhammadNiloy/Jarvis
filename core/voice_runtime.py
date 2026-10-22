@@ -6,7 +6,7 @@ import threading
 import time
 
 from core.voice_capture import AudioUtterance, Endpointer, VoiceConfig
-from core.voice_policy import Recognition, can_interrupt, is_echo, is_stop, strip_wake_word
+from core.voice_policy import Recognition, can_interrupt, is_echo, means_stop, stop_heard, strip_wake_word
 from core.conversation_log import record, record_recognition
 
 
@@ -142,7 +142,7 @@ class ContinuousListener:
         if result.playback_id is not None:
             echo = is_echo(result.text, result.playback_text)
             addressed = strip_wake_word(result.text) is not None
-            if self.config.echo_mode == 'speakers' and (echo or not (addressed or is_stop(result.text))):
+            if self.config.echo_mode == 'speakers' and (echo or not (addressed or stop_heard(result, 0.35))):
                 # Began while Jarvis was audible (or within 0.3 s after): only
                 # "Jarvis ..." or "stop" count. Keep what you said afterwards.
                 record('voice_filter', reason='speakers_mode', text=result.text, uid=result.uid)
@@ -150,7 +150,7 @@ class ContinuousListener:
             if echo:
                 record('voice_filter', reason='response_echo', text=result.text, uid=result.uid)
                 return None
-            if not addressed and not is_stop(result.text):
+            if not addressed and not means_stop(result.text):
                 if result.text and utterance.voiced_after_playback_ms >= self.config.after_playback_speech_ms:
                     # Jarvis's echo opened the utterance, but you kept speaking
                     # after it stopped (e.g. answering "Shall I do that?").
@@ -160,9 +160,14 @@ class ContinuousListener:
                 record('voice_filter', reason='unaddressed_during_playback', text=result.text, uid=result.uid)
                 # Mixed loudspeaker audio must not turn into an executable action.
                 return None
-            if can_interrupt(result):
+            if can_interrupt(result, self.stop_confidence):
                 self.speech.stop(expected_id=result.playback_id)
         return result
+
+    @property
+    def stop_confidence(self):
+        """Over loudspeakers a short "stop" is often heard weakly ('Genesis stop' 0.40)."""
+        return 0.35 if self.config.echo_mode == 'speakers' else 0.65
 
     def _after_playback(self, utterance):
         """Speakers mode: recognize only the audio after Jarvis stopped (plus the
@@ -191,7 +196,7 @@ class ContinuousListener:
     def handle_interruption(self, utterance):
         """Never puts partial words on the command queue."""
         result = self._transcribe(utterance, partial=True)
-        if not self._stop.is_set() and can_interrupt(result):
+        if not self._stop.is_set() and can_interrupt(result, self.stop_confidence):
             stopped = self.speech.stop(expected_id=utterance.playback_id)
             record('interruption', text=result.text, playback_id=utterance.playback_id,
                    stopped=bool(stopped))

@@ -15,7 +15,7 @@ from typing import Optional
 
 from core.command_result import Command
 from core.conversation_log import record
-from core.voice_policy import STOP_PHRASES, strip_wake_word, words
+from core.voice_policy import means_stop, stop_heard, strip_wake_word, words
 
 
 # --- short answers ------------------------------------------------------------
@@ -30,8 +30,6 @@ _NEGATIONS = {'no', 'nope', 'nah', 'not', "don't", 'never', 'negative'}
 _AFFIRMATIONS = _YES - {'do', 'go'}  # words that say yes on their own
 _CANCEL = {('cancel',), ('never', 'mind'), ('nevermind',), ('forget', 'it'), ('cancel', 'that'),
            ('cancel', 'it')}
-# How recognition spells "stop": stopped, stoppe, stopp, stahp, stops, stopping.
-_STOP_WORD = re.compile(r"st(?:o+p+(?:e|ed|s|ing)?|a+h*p+)")
 _WAKE_VARIANTS = {'jarvis', 'yarvis', 'jervis', 'javis'}
 
 
@@ -92,35 +90,23 @@ def strip_echoed_prompt(text, *prompts):
     return text
 
 
-def _stop_words(text):
+def _without_wake_word(text):
     addressed = strip_wake_word(text)
     tokens = list(words(addressed if addressed is not None else text))
-    if tokens and tokens[0] in _WAKE_VARIANTS:  # 'Yarvis stop'
+    if tokens and tokens[0] in _WAKE_VARIANTS:  # 'Yarvis never mind'
         tokens = tokens[1:]
-    return tokens
-
-
-def means_stop(text):
-    """'stop', 'Jarvis stop', and how recognition spells it ('stopped', 'stahp')."""
-    tokens = _stop_words(text)
-    return tuple(tokens) in STOP_PHRASES or (
-        any(_STOP_WORD.fullmatch(t) for t in tokens) and
-        all(t == 'please' or _STOP_WORD.fullmatch(t) for t in tokens))
+    return ' '.join(tokens)
 
 
 def means_cancel(text):
-    return means_stop(text) or answer_kind(' '.join(_stop_words(text))) == 'cancel'
+    """Stop or cancel (see voice_policy.means_stop), never mind, forget it."""
+    return means_stop(text, cancel=True) or answer_kind(_without_wake_word(text)) == 'cancel'
 
 
-def heard_as(recognition, meaning):
-    """The primary transcript and every alternative worth considering mean the
-    same thing. Cancelling is harmless, so 0.5 is enough."""
-    if recognition.error or recognition.truncated or not recognition.text:
-        return False
-    if recognition.confidence is not None and recognition.confidence < 0.5:
-        return False
-    return meaning(recognition.text) and all(
-        meaning(a.text) for a in recognition.alternatives if a.confidence is None or a.confidence >= 0.5)
+def stop_threshold(recognition):
+    """0.5, or 0.35 for a stop heard over Jarvis's own voice (the runtime only lets
+    a short stop or "Jarvis ..." through then)."""
+    return 0.35 if recognition.playback_id is not None else 0.5
 
 
 # --- the state ------------------------------------------------------------------
@@ -199,7 +185,9 @@ class ConversationState:
         state = self.current
         if state is IDLE:
             return None
-        if heard_as(recognition, means_cancel):
+        if stop_heard(recognition, stop_threshold(recognition), cancel=True) or (
+                answer_kind(_without_wake_word(recognition.text)) == 'cancel' and
+                answer_reliable(recognition, 'cancel')):
             self.clear('cancelled')
             return Answer('cancel')
         if recognition.error or recognition.truncated or not text:

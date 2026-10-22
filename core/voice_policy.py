@@ -52,6 +52,35 @@ def is_stop(text):
     return words(command if command is not None else text) in STOP_PHRASES
 
 
+# How recognition spells "stop" and "cancel": stopped, stoppe, stahp, cancelled.
+_STOP_WORD = re.compile(r"st(?:o+p+(?:e|ed|s|ing)?|a+h*p+)")
+_CANCEL_WORD = re.compile(r"cancel(?:s|l?ed|l?ing)?")
+_NOT = {'not', 'no', 'never', "don't", 'don’t', "can't", 'cannot', "won't", "didn't"}
+
+
+def means_stop(text, cancel=False):
+    """A short utterance (<= 4 words) with "stop" (or "cancel") anywhere in it:
+    'Jarvis stop Jarvis', 'Genesis stop' - the other words are wake-word variants
+    or mishearings of it. Negated ('don't stop') or with a target ('stop the
+    timer', 'cancel my reminder': those are commands) it is not."""
+    tokens = words(text)
+    if not tokens or len(tokens) > 4 or set(tokens) & _NOT:
+        return False
+    if not any(_STOP_WORD.fullmatch(t) or (cancel and _CANCEL_WORD.fullmatch(t)) for t in tokens):
+        return False
+    addressed = strip_wake_word(text)
+    return classify_intent(addressed if addressed is not None else text) == 'chat'
+
+
+def stop_heard(result, threshold, cancel=False):
+    """Stopping is harmless, so the primary transcript decides, at `threshold`."""
+    if result.error or result.truncated or not result.text:
+        return False
+    if result.confidence is not None and result.confidence < threshold:
+        return False
+    return means_stop(result.text, cancel)
+
+
 def is_echo(text, playback_text):
     heard, spoken = words(text), words(playback_text)
     return bool(heard and spoken and any(spoken[i:i + len(heard)] == heard
@@ -102,12 +131,15 @@ def alternatives_conflict(result, important=False):
     return conflict_reason(result, important) is not None
 
 
-def can_interrupt(result):
-    """Partial recognition may only cancel speech, never authorize an action."""
+def can_interrupt(result, stop_confidence=0.65):
+    """Partial recognition may only cancel speech, never authorize an action.
+    A short stop needs `stop_confidence` (0.35 over loudspeakers, see ECHO_MODE)."""
     if result.error or result.truncated or not result.text:
         return False
     if is_echo(result.text, result.playback_text):
         return False
+    if stop_heard(result, stop_confidence):
+        return True
     if result.confidence is not None and result.confidence < 0.65:
         return False
     if alternatives_conflict(result, important=True):

@@ -50,7 +50,8 @@ class ReminderRequest:
 
 
 _PREFIX = re.compile(
-    r"^\W*(?:(?:hey|ok|okay)\s+)?(?:jarvis\W+)?(?:(?:can|could|would|will)\s+you\s+|please\s+)*"
+    # Words before "Jarvis" ("I said Jarvis set an alarm ...") are never the label.
+    r"^\W*(?:(?:hey|ok|okay)\s+)?(?:.*?\b[jy]arvis\W+)?(?:(?:can|could|would|will)\s+you\s+|please\s+)*"
     r"(?:remind\s+(?:me|us)|(?:set|create|add|make)\s+(?:(?:a|an|another|new)\s+)*(?:reminder|alarm)"
     r"|wake\s+(?:me\s+)?up|wake\s+me)\b", re.IGNORECASE)
 _ALARM = re.compile(r"\balarms?\b|\bwake\s+(?:me|up)\b", re.IGNORECASE)
@@ -219,7 +220,7 @@ def parse_reminder(text, now):
                 date_value = WEEKDAYS.index(match.group('wd').lower())
             break
     source.take(_PART_OF_DAY)
-    task = None if kind == 'alarm' and not _has_words(source.remainder()) else source.remainder()
+    task = _alarm_label(source.remainder()) if kind == 'alarm' else source.remainder()
 
     def ask(question):
         return ReminderRequest(task, None, recurrence, weekday, kind, question)
@@ -295,6 +296,21 @@ def _meridiem_question(clock):
 
 def _has_words(text):
     return bool(text and re.search(r"[a-z]", text, re.IGNORECASE))
+
+
+_ALARM_FILLER = {'from', 'for', 'at', 'in', 'the', 'on', 'to', 'by', 'me', 'and', 'a', 'an', 'now', 'of'}
+
+
+def _alarm_label(text):
+    """What is left of an alarm request after the time, without leftover filler:
+    'set an alarm from 2 minutes from now' leaves 'from', which is no label."""
+    tokens = (text or '').split()
+    while tokens and tokens[0].lower() in _ALARM_FILLER:
+        tokens.pop(0)
+    while tokens and tokens[-1].lower() in _ALARM_FILLER:
+        tokens.pop()
+    label = ' '.join(tokens)
+    return label if _has_words(label) else None
 
 
 def find_clock(text):

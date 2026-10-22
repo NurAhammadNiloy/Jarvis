@@ -60,9 +60,6 @@ NOISE = Recognition(error='unrecognized')                                       
 TZ = ZoneInfo('Europe/Helsinki')
 NOW = datetime(2026, 10, 22, 11, 24, 42, tzinfo=TZ)
 
-# Fails on the code as it was during the session; removed as each step fixes it.
-baseline = pytest.mark.xfail(strict=True, reason='baseline: fails before the fix')
-
 
 @pytest.fixture
 def jarvis(tmp_path):
@@ -92,14 +89,35 @@ def test_weak_speech_without_wake_word_is_ignored_when_nothing_is_pending(jarvis
 
 # --- stop -------------------------------------------------------------------------------
 
-@pytest.mark.parametrize('stop', [pytest.param(STOP_JARVIS, marks=baseline), pytest.param(STOP_STOP, marks=baseline),
-                                  WEAK_STOP, pytest.param(GENESIS, marks=baseline)],
+@pytest.mark.parametrize('stop', [STOP_JARVIS, STOP_STOP, WEAK_STOP, GENESIS],
                          ids=['Jarvis stop Jarvis', 'Jarvis stop Jarvis stop', 'Jarvis stop 0.65', 'Genesis stop'])
 def test_stop_heard_over_jarvis_stops_without_the_model(jarvis, stop):
     jarvis.hear(stop)
     jarvis.speech.stop.assert_called_with(expected_id=stop.playback_id)
     jarvis.resolver.assert_not_called()
     jarvis.output.assert_not_called()
+
+
+@pytest.mark.parametrize('text, stop, cancel', [
+    ('stop', True, True), ('Jarvis stop Jarvis', True, True), ('Genesis stop', True, True),
+    ('please stop talking', True, True), ('Jarvis stoppe', True, True), ('cancel', False, True),
+    ('Jarvis cancel that', False, True),
+    ("don't stop", False, False), ('I cannot stop', False, False),         # negated
+    ('stop the timer', False, False), ('cancel my dentist reminder', False, False),  # commands
+    ('cancel the alarm', False, False),
+    ('stop and tell me the time now', False, False),                        # more than 4 words
+])
+def test_what_counts_as_stop(text, stop, cancel):
+    from core.conversation_state import means_cancel
+    from core.voice_policy import means_stop
+    assert means_stop(text) == stop
+    assert means_cancel(text) == cancel
+
+
+def test_bare_cancel_with_nothing_pending_is_just_acknowledged(jarvis):
+    jarvis.hear(heard('cancel', 0.9))
+    assert jarvis.said() == ['Okay.']
+    jarvis.resolver.assert_not_called()
 
 
 def speakers_listener(recognition):
@@ -110,7 +128,6 @@ def speakers_listener(recognition):
     return listener, speech
 
 
-@baseline
 @pytest.mark.parametrize('stop', [GENESIS, STOP_JARVIS, WEAK_STOP], ids=['Genesis stop', 'Jarvis stop Jarvis', 'Jarvis stop 0.65'])
 def test_short_stop_during_playback_interrupts_in_speakers_mode(stop):
     listener, speech = speakers_listener(stop)
@@ -119,7 +136,6 @@ def test_short_stop_during_playback_interrupts_in_speakers_mode(stop):
     speech.stop.assert_called_once_with(expected_id=stop.playback_id)
 
 
-@baseline
 def test_short_stop_interrupts_from_a_partial_recognition_too():
     listener, speech = speakers_listener(GENESIS)
     speech.stop.return_value = True
@@ -129,27 +145,40 @@ def test_short_stop_interrupts_from_a_partial_recognition_too():
 
 # --- alarms --------------------------------------------------------------------------------
 
-@baseline
 def test_alarm_without_a_real_label_has_none(jarvis):
     jarvis.hear(ALARM_FROM)
     assert jarvis.said() == ['Alarm set for today at 11:26 AM.']
     assert jarvis.stored() == [('alarm', None, NOW + timedelta(minutes=2))]
 
 
-@baseline
 def test_words_before_jarvis_are_not_the_alarm_label(jarvis):
     jarvis.hear(I_SAID)          # alternatives differ ('I said' / 'Ice Age'): confirmed first
     jarvis.hear(heard('yes', 0.6191988))
     assert jarvis.stored() == [('alarm', None, NOW + timedelta(minutes=2))]
 
 
-@baseline
 def test_slot_answer_that_parses_is_accepted_at_0_5(jarvis):
     jarvis.hear(SET_ALARM)
     assert jarvis.said() == ['What time should I set the alarm for?']
     jarvis.hear(IN_TWO_MINUTES)
     assert jarvis.said()[-1] == 'Alarm set for today at 11:26 AM.'
     assert jarvis.stored() == [('alarm', None, NOW + timedelta(minutes=2))]
+
+
+def test_slot_answer_with_a_different_likely_time_is_asked_again(jarvis):
+    jarvis.hear(SET_ALARM)
+    jarvis.hear(heard('in 2 minutes', 0.71, ('in 3 minutes', 0.6)))
+    assert jarvis.said()[-1] == "I'm not sure I heard that. What time should I set the alarm for?"
+    assert jarvis.stored() == []
+
+
+@pytest.mark.parametrize('request_, label', [
+    ('set an alarm from 2 minutes from now', None), ('set an alarm for the 2 minutes from now', None),
+    ('set an alarm for the gym in 2 minutes', 'gym'), ('set an alarm in 2 minutes to take the pizza out', 'take the pizza out'),
+])
+def test_alarm_labels_keep_only_real_words(request_, label):
+    from core.reminder_parser import parse_reminder
+    assert parse_reminder(request_, NOW).task == label
 
 
 # --- the terminal --------------------------------------------------------------------------
