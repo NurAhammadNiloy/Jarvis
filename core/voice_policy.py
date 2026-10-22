@@ -32,9 +32,19 @@ def words(text):
     return tuple(re.findall(r"[\w]+(?:['’][\w]+)?", text.lower()))
 
 
+# A word in front of the wake word that still means something stays in the request.
+_KEEP_BEFORE_WAKE = {'no', 'yes', 'not', "don't", 'stop', 'cancel'}
+
+
 def strip_wake_word(text):
-    match = re.match(r"^\s*jarvis\b[\s,.:!?-]*", text, re.IGNORECASE)
-    return text[match.end():].strip() if match else None
+    """The request after "Jarvis" as the first or second word ("hey Jarvis, ...",
+    "ok Jarvis ..."), or None when it is not addressed to Jarvis."""
+    match = re.match(r"^\s*(?:([\w'’]+)[\s,.:!?-]+)?jarvis\b[\s,.:!?-]*", text, re.IGNORECASE)
+    if not match:
+        return None
+    rest = text[match.end():].strip()
+    before = (match.group(1) or '').lower()
+    return f"{before} {rest}".strip() if before in _KEEP_BEFORE_WAKE else rest
 
 
 STOP_PHRASES = {('stop',), ('quiet',), ('silence',), ('stop', 'speaking'),

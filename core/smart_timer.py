@@ -295,6 +295,17 @@ class SmartTimerManager:
     
     @staticmethod
     def _extract_label(text: str) -> Optional[str]:
+        """Timer label without a leading "to" / "for": "to drink coffee" -> "Drink Coffee"."""
+        label = SmartTimerManager._extract_raw_label(text)
+        if label:
+            words = label.split()
+            while words and words[0].lower() in ('to', 'for'):
+                words.pop(0)
+            label = ' '.join(words) or None
+        return label
+
+    @staticmethod
+    def _extract_raw_label(text: str) -> Optional[str]:
         """Extract timer label from natural language."""
         text_lower = text.lower()
         

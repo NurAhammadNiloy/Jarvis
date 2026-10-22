@@ -267,3 +267,61 @@ def test_a_new_request_instead_of_an_answer_runs(jarvis):
     jarvis.hear(CANCEL_THE_TIMER)
     jarvis.hear(heard('what time is it', 0.95))
     assert jarvis.said()[-1].startswith('The current time is') and len(jarvis.timers()) == 3
+
+
+# --- small fixes ---------------------------------------------------------------------------
+
+STOP_THE_MUSIC = heard('hey Jarvis stop the music', 0.87619227,                                          # 2025
+                       ('hey Jarvis stop the music hey Jarvis', 0.72383797), ('hey Jarvis stopped the music', 0.87619227),
+                       ('hi Jarvis stop the music', 0.72543979), ('hey Yarvis stop the music', 0.87619227))
+NEAREST_ALARM = heard('nearest set an alarm', 0.74828422, ('you have to set an alarm', 0.66258723),       # 1215
+                      ('where is set an alarm', 0.66726607), ('you have a set an alarm', 0.63794559),
+                      ('nearest set alarm', 0.67370349))
+
+
+@pytest.mark.parametrize('text, addressed', [
+    ('hey Jarvis stop the music', 'stop the music'), ('ok Jarvis, what time is it', 'what time is it'),
+    ('Jarvis what time is it', 'what time is it'), ('no Jarvis stop', 'no stop'),
+    ('I said Jarvis set an alarm', None), ('the jar is full', None)])
+def test_wake_word_in_the_first_two_words(text, addressed):
+    from core.voice_policy import strip_wake_word
+    assert strip_wake_word(text) == addressed
+
+
+def test_hey_jarvis_in_passive_mode_is_heard(jarvis):
+    jarvis.hear(heard('hey Jarvis what time is it', 0.9), passive=True)
+    assert jarvis.said()[-1].startswith('The current time is')
+    jarvis.hear(heard('hey Jarvis', 0.9), passive=True)
+    assert jarvis.said()[-1] in ('At your service, sir.', 'How can I help, sir?')
+
+
+@pytest.mark.parametrize('utterance', [STOP_THE_MUSIC, heard('Jarvis pause YouTube', 0.9),
+                                       heard('Jarvis skip this song', 0.9)])
+def test_music_controls_stop_jarvis_and_say_it_cannot(jarvis, utterance):
+    jarvis.hear(utterance, passive=True)
+    assert jarvis.said() == ["I can't control YouTube playback yet."]
+    jarvis.assistant.speech.stop.assert_called()
+    jarvis.resolver.assert_not_called()
+
+
+def test_alarm_question_is_always_the_alarm_question(jarvis):
+    jarvis.hear(NEAREST_ALARM)
+    assert jarvis.said() == ['What time should I set the alarm for?']
+    jarvis.hear(heard('in 3 minutes', 0.85853094))
+    assert jarvis.said()[-1] == 'Alarm set for today at 1:15 PM.'   # no "nearest set an alarm" label
+
+
+def test_words_with_a_time_before_set_an_alarm_are_kept():
+    from core.command_engine import _from_alarm_words
+    assert _from_alarm_words('nearest set an alarm') == 'set an alarm'
+    assert _from_alarm_words('tomorrow set an alarm at 7') == 'tomorrow set an alarm at 7'
+
+
+@pytest.mark.parametrize('query, label', [
+    ('set a timer for 5 minutes to drink coffee', 'Drink Coffee'),
+    ('set a timer for 10 minutes for the laundry', 'Laundry'),
+    ('set a pasta timer for 10 minutes', 'Pasta'),
+])
+def test_timer_labels_drop_a_leading_to_or_for(query, label):
+    from core.smart_timer import extract_timer_info
+    assert extract_timer_info(query)['label'] == label

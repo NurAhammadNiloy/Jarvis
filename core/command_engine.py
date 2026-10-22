@@ -22,6 +22,20 @@ TIMER_ACTIONS = {
 }
 
 
+_SET_ALARM = re.compile(r"\b(?:set|create|add|make)\s+(?:(?:a|an|another|new)\s+)*alarm\b|\bwake\s+me\b", re.IGNORECASE)
+_TIME_WORDS = re.compile(r"\d|\b(?:today|tonight|tomorrow|morning|evening|afternoon|noon|midnight|monday|tuesday|"
+                         r"wednesday|thursday|friday|saturday|sunday|a\.?m|p\.?m|every|daily)\b", re.IGNORECASE)
+
+
+def _from_alarm_words(query):
+    """'nearest set an alarm' (a misheard "Jarvis"): the words before "set an alarm"
+    are neither the label nor a time, unless they contain a time."""
+    match = _SET_ALARM.search(query)
+    if match and match.start() > 0 and not _TIME_WORDS.search(query[:match.start()]):
+        return query[match.start():]
+    return query
+
+
 def understand_query(query, services, default_location=DEFAULT_LOCATION):
     """Parse without executing actions. Intent comes from the routing table."""
     routed = route(query)
@@ -35,7 +49,7 @@ def understand_query(query, services, default_location=DEFAULT_LOCATION):
         elif _ALARM_LIST.search(query):
             args = {"operation": "list"}
         else:
-            args = dict(services.extract_reminder_info(query), kind="alarm", operation="create")
+            args = dict(services.extract_reminder_info(_from_alarm_words(query)), kind="alarm", operation="create")
     elif intent == "delete_reminder":
         args["when_text"] = query
     elif intent == "snooze_reminder":
@@ -96,7 +110,8 @@ boundary. Clock and response choice can be fixed for deterministic tests.
             return reply(question, status="pending", pending_action="reminder_time",
                          data={"task": task, "query": query})
         if task:
-            return reply("When should I remind you?", status="pending",
+            return reply("What time should I set the alarm for?" if intent == "alarm" else "When should I remind you?",
+                         status="pending",
                          pending_action="reminder_time", data={"task": task})
         return reply("I couldn't understand the reminder. Please try again with a task and time.", status="error")
     if intent == "list_reminders":

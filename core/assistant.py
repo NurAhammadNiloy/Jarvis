@@ -101,7 +101,8 @@ class Assistant:
         text = addressed if addressed is not None else recognition.text
         # Wake-only speech is an attention request in either conversation mode.
         # Repetitions are not a command, and must never reach the domain router.
-        wake_only = bool(words(recognition.text)) and set(words(recognition.text)) == {'jarvis'}
+        wake_only = bool(words(recognition.text)) and (set(words(recognition.text)) == {'jarvis'} or
+                                                         addressed is not None and not words(addressed))
         if wake_only and not recognition.error and not recognition.truncated:
             # This lower threshold only authorizes a greeting, never an action.
             if recognition.confidence is not None and recognition.confidence < 0.5:
@@ -137,6 +138,14 @@ class Assistant:
         handled = self._answer_pending(recognition, text)
         if handled is not None:
             return handled
+        if _MEDIA_CONTROL.search(text) and not recognition.error:
+            # "stop the music", "pause YouTube": Jarvis can open YouTube but not control it.
+            record('voice_decision', decision='media_control', text=text)
+            self.speech.stop()
+            self.active_conversation = True
+            self.last_active_time = self.clock()
+            self.output("I can't control YouTube playback yet.")
+            return True
         if stop_heard(recognition, stop_threshold(recognition)):
             # 'Jarvis stop Jarvis', 'Genesis stop' (0.40, heard over Jarvis): stop.
             record('voice_decision', decision='stop', text=text, playback_id=recognition.playback_id)
@@ -322,6 +331,8 @@ class Assistant:
             return None
         if args.get('question'):
             return args['question']
+        if command.intent == 'alarm':
+            return 'What time should I set the alarm for?'
         return 'When should I remind you?' if args.get('task') else None
 
     @staticmethod
@@ -643,3 +654,9 @@ def _list_timers(timers):
     from core.command_description import duration_words
     names = [t.label.lower() if t.label else f"the {duration_words(t.duration_seconds, True)} one" for t in timers]
     return ', '.join(names[:-1]) + ' or ' + names[-1] if len(names) > 1 else ''.join(names)
+
+
+# "stop the music", "pause YouTube", "skip this song": playback Jarvis cannot control.
+_MEDIA_CONTROL = re.compile(
+    r"^\W*(?:please\s+)?(?:stop|pause|resume|unpause|skip|mute|unmute|close|turn\s+(?:off|down|up)|next)\b"
+    r"(?:\s+(?:the|this|that|my))?\s+(?:music|song|songs|youtube|video|playback|track)\b", re.IGNORECASE)
