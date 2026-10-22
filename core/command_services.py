@@ -8,12 +8,21 @@ from core.command_result import ActionResult
 
 
 class CommandServices:
-    def __init__(self, notifications=None, now=None):
+    def __init__(self, notifications=None, reminders=None, now=None):
         self.notifications = notifications or TextNotifications()
         self._timers = None
+        self._reminders = reminders
         if now is None:
             from core.reminder_parser import local_now as now
         self.now = now
+
+    @property
+    def reminders(self):
+        """The reminder service; the application's shared one unless injected."""
+        if self._reminders is None:
+            from core.reminder_manager import get_service
+            self._reminders = get_service(notify=self.notifications.speak)
+        return self._reminders
 
     @property
     def timers(self):
@@ -69,25 +78,10 @@ class CommandServices:
 
     def reminder(self, request):
         """Schedule a parsed request (see extract_reminder_info)."""
-        from core import reminder_manager
-        reminder_manager.initialize_reminders(notify=self.notifications.speak)
-        messages = []
-        # Transitional: the legacy scheduler takes a string. Replaced by the
-        # SQLite scheduler, which takes the datetime itself.
-        recurring = request['recurrence'] != 'none'
-        succeeded = reminder_manager.handle_reminder(
-            request['task'], request['due'].strftime('%Y-%m-%d %H:%M:%S'), recurring,
-            request['recurrence'] if recurring else None, respond=messages.append,
-            notify=self.notifications.speak,
-        )
-        return ActionResult(tuple(messages), succeeded)
+        return self.reminders.create(request)
 
-    def list_reminders(self):
-        from core import reminder_manager
-        reminder_manager.initialize_reminders(notify=self.notifications.speak)
-        messages = []
-        reminder_manager.get_reminders(respond=messages.append)
-        return ActionResult(tuple(messages))
+    def list_reminders(self, kind=None):
+        return self.reminders.list_reminders(kind)
 
     def timer_action(self, action, query, info):
         messages = []

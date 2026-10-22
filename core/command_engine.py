@@ -57,6 +57,9 @@ boundary. Clock and response choice can be fixed for deterministic tests.
     def action_reply(action):
         # Legacy callers consider a spoken domain failure handled. Preserve
         # that contract while giving new callers the actual failure status.
+        if action.pending:
+            return reply(*action.messages, status="pending", pending_action="choose_reminder",
+                         legacy_handled=True)
         return reply(*action.messages, status="handled" if action.succeeded else "error",
                      legacy_handled=True)
 

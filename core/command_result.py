@@ -33,3 +33,4 @@ class CommandResult:
 class ActionResult:
     messages: Tuple[str, ...]
     succeeded: bool = True
+    pending: bool = False  # the service asked a question (e.g. which reminder)

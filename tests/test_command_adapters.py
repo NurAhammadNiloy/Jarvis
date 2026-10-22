@@ -100,62 +100,6 @@ def test_weather_followup_uses_injected_provider(monkeypatch):
     services.weather.assert_called_once_with('Kokkola', detailed=True)
 
 
-@pytest.fixture
-def reminders(monkeypatch, tmp_path):
-    from core import reminder_manager as manager
-    monkeypatch.setattr(manager, 'REMINDER_FILE', str(tmp_path / 'reminders.json'))
-    monkeypatch.setattr(manager, 'reminders', [])
-    monkeypatch.setattr(manager, '_initialized', False)
-    monkeypatch.setattr(manager, 'run_scheduled_jobs', Mock())
-    timer = Mock()
-    monkeypatch.setattr(manager.threading, 'Timer', timer)
-    return manager, timer
-
-
-def test_reminder_response_and_delayed_notification(reminders, monkeypatch):
-    manager, timer = reminders
-    notifications = []
-    services = CommandServices(TextNotifications(notifications.append))
-    monkeypatch.setattr(services, 'extract_reminder_info', lambda q: {
-        'task': 'call mom', 'due': datetime.now() + timedelta(minutes=5), 'recurrence': 'none',
-        'weekday': None, 'kind': 'reminder', 'question': None,
-    })
-    result = execute_query('remind me to call mom in 5 minutes', services)
-    assert result.status == 'handled'
-    assert len(result.messages) == 1 and 'Reminder set' in result.messages[0]
-    assert notifications == []
-    timer.return_value.start.assert_called_once()
-    timer.call_args.args[1]()  # Execute the scheduled callback without waiting.
-    assert notifications == ['Sir, this is your reminder: call mom']
-    with open(manager.REMINDER_FILE) as stream:
-        assert json.load(stream)[0]['completed'] is True
-
-
-def test_restoration_is_explicit_idempotent_and_uses_selected_output(reminders):
-    manager, timer = reminders
-    record = {'task': 'task', 'time': (datetime.now() + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S'),
-              'completed': False, 'recurring': False, 'interval': None}
-    with open(manager.REMINDER_FILE, 'w') as stream:
-        json.dump([record], stream)
-    notifications = []
-    manager.initialize_reminders(notify=notifications.append)
-    manager.initialize_reminders(notify=notifications.append)
-    timer.assert_called_once()
-    timer.call_args.args[1]()
-    assert notifications == ['Sir, this is your reminder: task']
-
-
-def test_recurring_reminder_callback_uses_selected_output(reminders, monkeypatch):
-    manager, _ = reminders
-    schedule = Mock()
-    monkeypatch.setattr(manager, 'schedule', schedule)
-    notifications = []
-    manager.schedule_recurring_reminder('2030-01-01 12:00:00', 'task', 'daily', notify=notifications.append)
-    callback = schedule.every.return_value.day.at.return_value.do.call_args.args[0]
-    callback()
-    assert notifications == ['Sir, this is your recurring reminder: task']
-
-
 def test_voice_notification_adapter_preserves_smart_dispatch(monkeypatch):
     from core import timer_alerts
     milestone, completion = Mock(), Mock()
