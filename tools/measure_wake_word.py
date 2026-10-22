@@ -1,14 +1,16 @@
 """Measure the on-device wake word in your room, with your voice and microphone.
 
-    env\\Scripts\\python.exe -B tools\\measure_wake_word.py
+    env\\Scripts\\python.exe -B tools\\measure_wake_word.py                  (about 3 minutes)
     env\\Scripts\\python.exe -B tools\\measure_wake_word.py --threshold 0.4
 
 1. Two minutes of normal room sound (talk, type, play a video; just don't say
-   "Hey Jarvis"): every detection is a false wake-up.
-2. You say "Hey Jarvis" 10 times when prompted: how many were detected.
+   "Hey Jarvis"). You note what was playing; it is printed with the results.
+2. You say "Hey Jarvis" 10 times when prompted.
 
-It prints the scores so you can choose WAKE_WORD_THRESHOLD in config/settings.py.
-Nothing is recorded or saved, and nothing is sent anywhere.
+The same audio goes to the plain model and, once you have trained it
+(tools/train_wake_verifier.py), to the model tuned to your voice, so the two can be
+compared directly. Target: at least 9 of 10 detected, and no background score at or
+above the threshold. Nothing is recorded or saved, and nothing is sent anywhere.
 """
 import argparse
 from pathlib import Path
@@ -17,10 +19,18 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# A suggested threshold stays this far above the highest background score, and never below
+# MIN_THRESHOLD: two minutes of background cannot show everything a day brings (your
+# plain-"Jarvis" run hit 0.43 in background that peaked at 0.05 an hour earlier).
+MARGIN = 0.1
+MIN_THRESHOLD = 0.3
 
-def listen(frames, detector, seconds, clock=time.monotonic):
-    """Feed `seconds` of audio to the detector: (detections as (time, score), highest score)."""
-    detections, highest, started = [], 0.0, clock()
+
+def listen(frames, detectors, seconds, clock=time.monotonic):
+    """Feed `seconds` of audio to every detector: per detector, (detections as
+    (time, score), highest score)."""
+    results = [([], 0.0) for _ in detectors]
+    started = clock()
     while clock() - started < seconds:
         try:
             frame = frames.read(timeout=0.1)
@@ -28,35 +38,58 @@ def listen(frames, detector, seconds, clock=time.monotonic):
             continue
         if frame is None:
             continue
-        event = detector.process(frame)
-        highest = max(highest, detector.last_score)
-        if event is not None:
-            detections.append((clock() - started, event.score))
-    return detections, highest
+        for index, detector in enumerate(detectors):
+            event = detector.process(frame)
+            found, highest = results[index]
+            if event is not None:
+                found.append((clock() - started, event.score))
+            results[index] = (found, max(highest, detector.last_score))
+    return results
 
 
-def summary(false_wakes, background_seconds, tries, threshold):
-    """The verdict lines, from false wake-ups and per-try (detected, highest score)."""
-    detected = sum(1 for hit, _ in tries if hit)
-    per_hour = len(false_wakes) * 3600 / background_seconds if background_seconds else 0
-    lines = [f"False wake-ups: {len(false_wakes)} in {background_seconds / 60:.0f} min (about {per_hour:.0f} per hour)",
-             f"Detected: {detected} of {len(tries)}"]
+def advice(background_peak, tries, threshold):
+    """A threshold suggestion that never goes at or below the background peak (+ a margin)."""
     misses = [score for hit, score in tries if not hit]
-    if misses:
-        lines.append("Missed tries peaked at " + ', '.join(f"{s:.2f}" for s in misses)
-                     + f" (threshold {threshold:.2f})")
-    good = not false_wakes and detected >= 0.9 * len(tries)
-    lines.append("Verdict: GOOD" if good else "Verdict: needs tuning (see the advice below)")
-    if false_wakes:
-        lines.append("Advice: raise WAKE_WORD_THRESHOLD a little above the false wake-up scores "
-                     + ', '.join(f"{s:.2f}" for _, s in false_wakes) + ".")
-    if misses and not false_wakes:
-        lines.append(f"Advice: lower WAKE_WORD_THRESHOLD towards {max(min(misses) - 0.05, 0.1):.2f}, then run this again.")
+    floor = round(max(background_peak + MARGIN, MIN_THRESHOLD), 2)
+    if background_peak >= threshold:
+        return (f"Background reached {background_peak:.2f}, at or above the threshold: raise WAKE_WORD_THRESHOLD "
+                f"to at least {min(floor, 0.95):.2f}" + (", or tune to your voice." if misses else "."))
+    if not misses:
+        return None
+    wanted = round(min(misses) - MARGIN, 2)
+    if floor >= threshold:
+        return (f"No safe lower threshold: background reached {background_peak:.2f}, too close to {threshold:.2f}. "
+                "Tune the wake word to your voice (tools/record_voice.py, tools/train_wake_verifier.py).")
+    suggestion = max(wanted, floor)
+    caught = sum(1 for score in misses if score >= suggestion)
+    text = (f"Lowering WAKE_WORD_THRESHOLD to {suggestion:.2f} (safely above the background peak "
+            f"{background_peak:.2f}) would catch {caught} of the {len(misses)} misses.")
+    if caught < len(misses):
+        text += " The rest are too weak for any safe threshold: tune the wake word to your voice."
+    return text
+
+
+def summary(name, background, tries, threshold):
+    """Result lines for one detector: background (detections, highest), tries [(hit, score)]."""
+    false_wakes, highest = background
+    detected = sum(1 for hit, _ in tries if hit)
+    misses = [score for hit, score in tries if not hit]
+    lines = [f"{name}:",
+             f"  background: highest score {highest:.2f}, {len(false_wakes)} false wake-up(s)"
+             + (" at " + ', '.join(f"{s:.2f}" for _, s in false_wakes) if false_wakes else ""),
+             f"  detected: {detected} of {len(tries)}"
+             + (" (misses peaked at " + ', '.join(f"{s:.2f}" for s in misses) + ")" if misses else "")]
+    good = detected >= 0.9 * len(tries) and highest < threshold
+    lines.append("  verdict: GOOD" if good else "  verdict: not there yet")
+    tip = advice(highest, tries, threshold)
+    if tip and not good:
+        lines.append("  advice: " + tip)
     return lines
 
 
 def main():
-    from config.settings import WAKE_WORD_THRESHOLD
+    from config.settings import WAKE_WORD_THRESHOLD, WAKE_WORD_VERIFIER_GATE
+    from core.wake_word import VERIFIER_PATH, OpenWakeWordDetector
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--threshold', type=float, default=WAKE_WORD_THRESHOLD)
     parser.add_argument('--background-seconds', type=float, default=120)
@@ -65,38 +98,47 @@ def main():
     args = parser.parse_args()
 
     from core.voice_capture import MicrophoneFrames, VoiceConfig
-    from core.wake_word import OpenWakeWordDetector
-    detector = OpenWakeWordDetector(args.threshold)
+    names, detectors = ['Plain model'], [OpenWakeWordDetector(args.threshold)]
+    if VERIFIER_PATH.exists():
+        names.append('Tuned to your voice')
+        detectors.append(OpenWakeWordDetector(args.threshold, verifier_path=VERIFIER_PATH,
+                                              verifier_gate=WAKE_WORD_VERIFIER_GATE))
+    else:
+        print("Not tuned to your voice yet (tools/record_voice.py, then tools/train_wake_verifier.py): "
+              "measuring the plain model only.")
     device = int(args.device) if args.device and args.device.isdigit() else args.device
-    print(f"Wake-word test: \"Hey Jarvis\", threshold {args.threshold:.2f}\n")
+    print(f'Wake-word test: "Hey Jarvis", threshold {args.threshold:.2f}\n')
+    playing = input("What will be playing in the background (e.g. 'quiet room', 'YouTube video, typing')? ").strip()
 
     with MicrophoneFrames(VoiceConfig(input_device=device)) as frames:
-        print(f"Step 1: {args.background_seconds / 60:.0f} minutes of normal room sound. Talk, type or play a video,")
+        print(f"\nStep 1: {args.background_seconds / 60:.0f} minutes of normal room sound. Talk, type or play a video,")
         print("but don't say \"Hey Jarvis\". Starting in 3 seconds...")
-        listen(frames, detector, 3)
-        false_wakes, highest = [], 0.0
+        listen(frames, detectors, 3)
+        background = [([], 0.0) for _ in detectors]
         for start in range(0, int(args.background_seconds), 10):
-            found, peak = listen(frames, detector, min(10, args.background_seconds - start))
-            false_wakes += [(start + t, s) for t, s in found]
-            highest = max(highest, peak)
-            for t, s in found:
-                print(f"  false wake-up at {start + t:.0f} s, score {s:.2f}")
-            print(f"  {start + 10:.0f} s, highest score so far {highest:.2f}", end='\r')
-        print(f"\nHighest background score: {highest:.2f}\n")
+            results = listen(frames, detectors, min(10, args.background_seconds - start))
+            for index, (found, peak) in enumerate(results):
+                previous, highest = background[index]
+                background[index] = (previous + [(start + t, s) for t, s in found], max(highest, peak))
+            print(f"  {start + 10:.0f} s, highest so far: "
+                  + ', '.join(f"{n.lower()} {b[1]:.2f}" for n, b in zip(names, background)), end='\r')
+        print('\n')
 
         print("Step 2: say \"Hey Jarvis\" when prompted, at your normal distance and volume.")
-        tries = []
+        tries = [[] for _ in detectors]
         for number in range(1, args.tries + 1):
-            listen(frames, detector, 1.5)  # a pause, and the end of the previous try
+            listen(frames, detectors, 1.5)  # a pause, and the end of the previous try
             print(f"  ({number}/{args.tries}) Say \"Hey Jarvis\" now...", end=' ', flush=True)
-            found, peak = listen(frames, detector, 4)
-            hit = bool(found)
-            tries.append((hit, found[0][1] if hit else peak))
-            print(f"detected, score {found[0][1]:.2f}" if hit else f"missed (highest score {peak:.2f})")
+            results = listen(frames, detectors, 4)
+            for index, (found, peak) in enumerate(results):
+                tries[index].append((bool(found), found[0][1] if found else peak))
+            print(', '.join(f"{n.lower()}: " + (f"detected {t[-1][1]:.2f}" if t[-1][0] else f"missed ({t[-1][1]:.2f})")
+                            for n, t in zip(names, tries)))
 
-    print()
-    for line in summary(false_wakes, args.background_seconds, tries, args.threshold):
-        print(line)
+    print(f"\nResults (threshold {args.threshold:.2f}; background: {playing or 'not noted'})")
+    for name, back, tried in zip(names, background, tries):
+        for line in summary(name, back, tried, args.threshold):
+            print(line)
 
 
 if __name__ == '__main__':
