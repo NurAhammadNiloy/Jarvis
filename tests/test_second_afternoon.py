@@ -195,3 +195,31 @@ def test_hint_is_not_wasted_on_a_cancel_that_did_nothing(jarvis):
     jarvis.hear(START_TEA)
     jarvis.hear(CANCEL_TEA)
     assert jarvis.said()[-1].endswith('Say undo to bring it back.')
+
+
+# --- "at 10 minutes" is "in 10 minutes" ---------------------------------------------------
+
+AT_TEN_MINUTES = heard('Jarvis remind me to call my mom at 10 minutes', 0.92150974,                     # 533
+                       ('Yarvis remind me to call my mom at 10 minutes', 0.92150974))
+
+
+def test_reminder_at_10_minutes_is_in_10_minutes(jarvis):
+    jarvis.hear(AT_TEN_MINUTES)
+    (kind, text, _), = jarvis.reminders()
+    assert text == 'call my mom'                                    # not "call my mom minutes"
+    assert jarvis.services.reminders.store.pending()[0].due.astimezone(TZ).replace(tzinfo=None) == datetime(2026, 10, 22, 14, 30)
+    assert jarvis.said()[-1] == 'Done, reminding you at 2:30 PM: call my mom.'
+
+
+@pytest.mark.parametrize('request_, hour, minute, task', [
+    ('remind me to stretch at 2 hours', 16, 20, 'stretch'),
+    ('remind me to call mom at 10 minutes from now', 14, 30, 'call mom'),
+    ('remind me to call mom in 10 minutes', 14, 30, 'call mom'),
+    ('set an alarm at 10 minutes', 14, 30, None),
+    ('remind me to call mom at 10 pm', 22, 0, 'call mom'),                  # a unit-less "at 10" stays a clock time
+    ('remind me to call mom at 10', 10, 0, 'call mom'),
+])
+def test_at_with_a_unit_is_relative_without_one_it_is_a_clock_time(request_, hour, minute, task):
+    from core.reminder_parser import parse_reminder
+    parsed = parse_reminder(request_, NOW)
+    assert (parsed.due.hour, parsed.due.minute) == (hour, minute) and parsed.task == task

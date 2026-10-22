@@ -69,10 +69,11 @@ _OFFSET = (
     r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?|"
     r"zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)"
     r"\s+(?P<unit>" + _UNITS + r")\b")
-# "in 2 minutes", "after 2 minutes (from now)", "2 minutes from now"; for an
+# "in 2 minutes", "after 2 minutes (from now)", "at 10 minutes" (speech-to-text often hears
+# "in" as "at"; "at 10" without a unit stays a clock time), "2 minutes from now"; for an
 # alarm also "for 30 minutes" (a reminder to "run for 30 minutes" is its task).
 _RELATIVE = (
-    re.compile(r"\b(?:in|after)\s+" + _OFFSET + r"(?:\s+from\s+now\b)?", re.IGNORECASE),
+    re.compile(r"\b(?:in|after|at)\s+" + _OFFSET + r"(?:\s+from\s+now\b)?", re.IGNORECASE),
     re.compile(r"\b" + _OFFSET + r"\s+from\s+now\b", re.IGNORECASE),
 )
 _ALARM_RELATIVE = re.compile(r"\bfor\s+" + _OFFSET, re.IGNORECASE)
