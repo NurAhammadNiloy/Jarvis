@@ -25,7 +25,7 @@ _FEATURE_FILES = ('melspectrogram.onnx', 'embedding_model.onnx')
 SAMPLE_RATE = 16000
 CHUNK_SAMPLES = 1280      # openWakeWord scores 80 ms chunks of 16-bit audio
 CHUNK_BYTES = CHUNK_SAMPLES * 2
-VERIFIER_GATE = 0.05      # plain-model score from which the verifier decides
+VERIFIER_GATE = 0.09      # plain-model score from which the verifier decides (see settings)
 
 
 @dataclass(frozen=True)
@@ -176,46 +176,76 @@ def positive_examples(frames, gate=VERIFIER_GATE, threshold=0.25):
     return [features for score, features in frames if score >= cut]
 
 
-def verified_score(verifier, frames, gate=VERIFIER_GATE):
-    """The highest score a clip gets with the verifier applied as openWakeWord applies it."""
-    best = 0.0
-    for score, features in frames:
-        if score >= gate:
-            score = float(verifier.predict_proba(features)[0][-1])
-        best = max(best, score)
-    return best
+def tuned_peak(scored, gate=VERIFIER_GATE):
+    """The highest score of a clip whose frames are (plain score, verifier score): the
+    verifier decides from `gate` up, as openWakeWord applies it (score >= gate)."""
+    return max(((verifier if plain >= gate else plain) for plain, verifier in scored), default=0.0)
 
 
-def train_verifier(positive_clips, negative_clips, output_path, *, folds=5, threshold=0.5,
-                   gate=VERIFIER_GATE, model_dir=MODEL_DIR, progress=print):
+def evaluate(report, gate=VERIFIER_GATE, threshold=None):
+    """Held-out results of train_verifier's report at a verifier gate: every clip at every
+    chunk alignment counts as one try."""
+    threshold = report['threshold'] if threshold is None else threshold
+    positive = [scored for tries in report['positive'].values() for scored in tries]
+    negative = {name: [tuned_peak(scored, gate) for scored in tries] for name, tries in report['negative'].items()}
+    return {'tries': len(positive),
+            'plain_detected': sum(max(plain for plain, _ in scored) >= threshold for scored in positive),
+            'detected': sum(tuned_peak(scored, gate) >= threshold for scored in positive),
+            'missed': {name: sum(tuned_peak(scored, gate) < threshold for scored in tries)
+                       for name, tries in report['positive'].items()},
+            'negative_tries': sum(len(scores) for scores in negative.values()),
+            'false_wakes': {name: sum(score >= threshold for score in scores) for name, scores in negative.items()},
+            'plain_highest': max((plain for tries in report['negative'].values() for scored in tries
+                                  for plain, _ in scored), default=0.0),
+            'highest': max((max(scores) for scores in negative.values()), default=0.0)}
+
+
+# Where an 80 ms chunk starts relative to your words changes the scores a lot (a phone video
+# scored 0.20-0.50 at different alignments), so every clip is checked at four of them.
+ALIGNMENTS = (0, 320, 640, 960)
+# Your "Hey Jarvis" moments are learned from this plain score up, whatever the gate.
+TRAINING_FLOOR = 0.05
+
+
+def train_verifier(positive_clips, negative_clips, output_path, *, peak_clips=(), folds=5, threshold=0.5,
+                   model_dir=MODEL_DIR, progress=print):
     """Train the personal verifier, after checking it on clips it was not trained on.
 
-    Returns a report: per held-out clip, the plain and the tuned peak score.
+    `peak_clips` are background moments that once scored high (tools/measure_wake_word.py):
+    negatives, learned at every alignment because each is a rare example of a near-miss.
+    Returns a report: per held-out clip and alignment, the (plain, verifier) score of each
+    80 ms frame, so evaluate() can show the results at any gate.
     """
     import pickle
     import numpy as np
     from openwakeword.custom_verifier_model import train_verifier_model
 
-    positive_clips, negative_clips = [Path(p) for p in positive_clips], [Path(p) for p in negative_clips]
+    positive_clips = [Path(p) for p in positive_clips]
+    negative_clips = [Path(p) for p in negative_clips] + [Path(p) for p in peak_clips]
+    peaks = set(range(len(negative_clips) - len(peak_clips), len(negative_clips)))
     if len(positive_clips) < 5 or not negative_clips:
         raise ValueError('Need at least 5 "Hey Jarvis" clips and some other speech; run tools/record_voice.py')
     model = load_model(model_dir)
     progress(f'Reading {len(positive_clips)} "Hey Jarvis" clips and {len(negative_clips)} other clips...')
-    # Positives at four small shifts, as openWakeWord does, for slightly different features.
-    positives = [[clip_frames(model, read_wav(clip), offset) for offset in (0, 320, 640, 960)]
-                 for clip in positive_clips]
-    negatives = [clip_frames(model, read_wav(clip)) for clip in negative_clips]
+    positives = [[clip_frames(model, read_wav(clip), offset) for offset in ALIGNMENTS] for clip in positive_clips]
+    negatives = [[clip_frames(model, read_wav(clip), offset) for offset in ALIGNMENTS] for clip in negative_clips]
 
     def fit(pos_indices, neg_indices):
-        pos = [f for i in pos_indices for shifted in positives[i] for f in positive_examples(shifted, gate)]
-        neg = [features for i in neg_indices for _, features in negatives[i]]
+        pos = [f for i in pos_indices for shifted in positives[i] for f in positive_examples(shifted, TRAINING_FLOOR)]
+        neg = [features for i in neg_indices for k in (range(len(ALIGNMENTS)) if i in peaks else (0, 2))
+               for _, features in negatives[i][k]]
         if len(pos) < 5:
             raise ValueError('Too few usable "Hey Jarvis" moments: the plain model barely reacted to the clips. '
                              'Re-record them closer to the microphone.')
         return train_verifier_model(np.vstack(pos + neg), np.array([1] * len(pos) + [0] * len(neg)))
 
+    def scored(verifier, frames):
+        probabilities = verifier.predict_proba(np.vstack([features for _, features in frames]))[:, -1]
+        return [(plain, float(p)) for (plain, _), p in zip(frames, probabilities)]
+
     # Check on held-out clips first: each clip is scored by a verifier that never saw it.
-    report = {'positive': [], 'negative': []}
+    report = {'positive': {}, 'negative': {}, 'peaks': [negative_clips[i].name for i in sorted(peaks)],
+              'threshold': threshold}
     folds = max(2, min(folds, len(positive_clips), len(negative_clips) if len(negative_clips) > 1 else 2))
     for fold in range(folds):
         test_pos = [i for i in range(len(positive_clips)) if i % folds == fold]
@@ -223,11 +253,9 @@ def train_verifier(positive_clips, negative_clips, output_path, *, folds=5, thre
         verifier = fit([i for i in range(len(positive_clips)) if i not in test_pos],
                        [i for i in range(len(negative_clips)) if i not in test_neg] or list(range(len(negative_clips))))
         for i in test_pos:
-            frames = positives[i][0]
-            report['positive'].append((positive_clips[i].name, max(s for s, _ in frames), verified_score(verifier, frames, gate)))
+            report['positive'][positive_clips[i].name] = [scored(verifier, frames) for frames in positives[i]]
         for i in test_neg:
-            report['negative'].append((negative_clips[i].name, max(s for s, _ in negatives[i]),
-                                       verified_score(verifier, negatives[i], gate)))
+            report['negative'][negative_clips[i].name] = [scored(verifier, frames) for frames in negatives[i]]
         progress(f'  checked fold {fold + 1} of {folds}')
 
     verifier = fit(range(len(positive_clips)), range(len(negative_clips)))
@@ -235,5 +263,4 @@ def train_verifier(positive_clips, negative_clips, output_path, *, folds=5, thre
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'wb') as stream:
         pickle.dump(verifier, stream)
-    report['threshold'] = threshold
     return report

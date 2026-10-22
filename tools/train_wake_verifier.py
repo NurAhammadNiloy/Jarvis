@@ -16,31 +16,53 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def describe(report, threshold):
-    """Readable lines from train_verifier's report."""
-    positives, negatives = report['positive'], report['negative']
-    plain_hits = sum(1 for _, plain, _ in positives if plain >= threshold)
-    tuned_hits = sum(1 for _, _, tuned in positives if tuned >= threshold)
-    plain_noise = max((plain for _, plain, _ in negatives), default=0.0)
-    tuned_noise = max((tuned for _, _, tuned in negatives), default=0.0)
-    lines = [f'Checked on clips each verifier never saw (threshold {threshold:.2f}):',
-             f'  "Hey Jarvis" detected:     plain {plain_hits}/{len(positives)}, tuned {tuned_hits}/{len(positives)}',
-             f'  highest other-speech score: plain {plain_noise:.2f}, tuned {tuned_noise:.2f}']
-    missed = [(name, tuned) for name, _, tuned in positives if tuned < threshold]
+# Verifier gates shown side by side after training (WAKE_WORD_VERIFIER_GATE is one of them).
+GATES = (0.03, 0.05, 0.07, 0.09, 0.12, 0.15)
+
+
+def share(count, total):
+    return f'{100 * count / total:.0f}% ({count}/{total})' if total else '-'
+
+
+def describe(report, gate, threshold=None):
+    """Readable lines from train_verifier's report, at verifier gate `gate`."""
+    from core.wake_word import evaluate
+    threshold = report['threshold'] if threshold is None else threshold
+    result = evaluate(report, gate, threshold)
+    alignments = max((len(tries) for tries in report['positive'].values()), default=0)
+    false_wakes = sum(result['false_wakes'].values())
+    lines = [f'Checked on clips each verifier never saw, each at {alignments} chunk alignments '
+             f'(threshold {threshold:.2f}, verifier gate {gate:.2f}):',
+             f'  "Hey Jarvis" detected:  plain {share(result["plain_detected"], result["tries"])}, '
+             f'tuned {share(result["detected"], result["tries"])}',
+             f'  other speech and sound: highest score plain {result["plain_highest"]:.2f}, tuned {result["highest"]:.2f}; '
+             f'tuned false wake-ups {false_wakes} of {result["negative_tries"]}']
+    if report.get('peaks'):
+        accepted = [name for name in report['peaks'] if result['false_wakes'].get(name)]
+        lines.append(f'  saved background peaks ({len(report["peaks"])}): '
+                     + ('all rejected' if not accepted else 'still accepted: ' + ', '.join(accepted)))
+    missed = [(name, count) for name, count in result['missed'].items() if count]
     if missed:
-        lines.append('  still missed: ' + ', '.join(f'{name} ({score:.2f})' for name, score in missed))
-    good = tuned_hits >= 0.9 * len(positives) and tuned_noise < threshold
+        lines.append('  still missed: ' + ', '.join(f'{name} ({count} of {alignments})' for name, count in missed))
+    lines.append('Verifier gate (WAKE_WORD_VERIFIER_GATE): lower rescues more of your tries, higher trusts the '
+                 'tuning less on sounds it was never taught:')
+    for option in sorted(set(GATES) | {gate}):
+        at = evaluate(report, option, threshold)
+        lines.append(f'  {option:.2f}: detected {share(at["detected"], at["tries"])}, '
+                     f'false wake-ups {sum(at["false_wakes"].values())}' + ('   <- in use' if option == gate else ''))
+    good = result['detected'] >= 0.9 * result['tries'] and not false_wakes
     lines.append('Verdict: ' + ('GOOD' if good else 'not there yet') +
-                 ' (target: at least 9 of 10 detected, no other-speech score above the threshold)')
-    if not good and tuned_noise >= threshold:
-        lines.append('  Your other speech reaches the threshold: record more of it (--only speech) and train again.')
+                 ' (target: at least 9 of 10 detected, no false wake-ups)')
+    if not good and false_wakes:
+        lines.append('  Other sound reaches the threshold: record more of it (--only speech or --only background) '
+                     'and train again.')
     elif not good:
         lines.append('  Record more "Hey Jarvis" clips the way you missed them (--only wake) and train again.')
     return lines
 
 
 def main():
-    from config.settings import WAKE_WORD_THRESHOLD
+    from config.settings import WAKE_WORD_THRESHOLD, WAKE_WORD_VERIFIER_GATE
     from core.wake_word import VERIFIER_PATH, VOICE_DIR, train_verifier
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--threshold', type=float, default=WAKE_WORD_THRESHOLD)
@@ -53,7 +75,7 @@ def main():
         return 1
     report = train_verifier(positives, negatives, VERIFIER_PATH, threshold=args.threshold)
     print()
-    for line in describe(report, args.threshold):
+    for line in describe(report, WAKE_WORD_VERIFIER_GATE, args.threshold):
         print(line)
     print(f'\nSaved {VERIFIER_PATH}. Restart Jarvis to use it, then measure:')
     print('  env\\Scripts\\python.exe -B tools\\measure_wake_word.py')

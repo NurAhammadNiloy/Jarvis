@@ -115,8 +115,10 @@ def test_training_checks_on_unseen_clips_saves_the_verifier_and_the_app_uses_it(
     positives, negatives = clips(tmp_path)
     report = train_verifier(positives, negatives, tmp_path / 'verifier.pkl', progress=lambda *_: None)
     assert len(report['positive']) == 5 and len(report['negative']) == 2
-    assert all(tuned >= 0.5 for _, _, tuned in report['positive'])
-    assert all(tuned < 0.5 for _, _, tuned in report['negative'])
+    assert all(len(tries) == 4 for tries in report['positive'].values())      # four chunk alignments
+    result = wake_word.evaluate(report, gate=0.09)
+    assert result['tries'] == 20 and result['detected'] == 20
+    assert result['negative_tries'] == 8 and not any(result['false_wakes'].values())
 
     detector = create_detector('openwakeword', 0.5, verifier_path=tmp_path / 'verifier.pkl')
     assert detector.personal
@@ -137,19 +139,41 @@ def test_positive_examples_are_the_moments_near_the_clip_peak():
     assert wake_word.positive_examples([(0.03, 'x')]) == []          # never reached the gate
 
 
-def test_verified_score_uses_the_verifier_only_from_the_gate():
-    class Verifier:
-        def predict_proba(self, features):
-            return [[0.1, 0.9]]
-    assert wake_word.verified_score(Verifier(), [(0.04, None), (0.3, None)]) == 0.9
-    assert wake_word.verified_score(Verifier(), [(0.04, None)]) == 0.04
+def test_the_verifier_decides_only_from_the_gate():
+    # (plain score, verifier score) per 80 ms frame
+    assert wake_word.tuned_peak([(0.04, 0.9), (0.3, 0.6)], gate=0.09) == 0.6
+    assert wake_word.tuned_peak([(0.09, 0.9)], gate=0.09) == 0.9           # at the gate counts, as in openWakeWord
+    assert wake_word.tuned_peak([(0.073, 0.6), (0.02, 0.1)], gate=0.09) == 0.073
 
 
-def test_training_report_verdict():
-    good = {'positive': [('a', 0.4, 0.9)] * 10, 'negative': [('n', 0.3, 0.1)]}
-    assert train.describe(good, 0.5)[-1].startswith('Verdict: GOOD')
-    noisy = {'positive': [('a', 0.4, 0.9)] * 10, 'negative': [('n', 0.3, 0.7)]}
-    assert 'record more of it' in train.describe(noisy, 0.5)[-1]
+def report(positive, negative, peaks=()):
+    return {'positive': positive, 'negative': negative, 'peaks': list(peaks), 'threshold': 0.5}
+
+
+# A rescued try (plain 0.11, verifier 0.8), a weak one (plain 0.06, verifier 0.7), and a video
+# the verifier wrongly likes at plain 0.07.
+TRIES = {'hey_jarvis_001.wav': [[(0.9, 0.95)]] * 4, 'hey_jarvis_002.wav': [[(0.11, 0.8)]] * 4,
+         'hey_jarvis_003.wav': [[(0.06, 0.7)]] * 4}
+VIDEO = {'peak_1.wav': [[(0.07, 0.6)]] * 2 + [[(0.02, 0.6)]] * 2, 'speech_001.wav': [[(0.3, 0.1)]] * 4}
+
+
+def test_evaluation_at_a_gate_counts_every_alignment():
+    at_low = wake_word.evaluate(report(TRIES, VIDEO), gate=0.05)
+    assert (at_low['detected'], at_low['plain_detected'], at_low['tries']) == (12, 4, 12)
+    assert at_low['false_wakes'] == {'peak_1.wav': 2, 'speech_001.wav': 0} and at_low['highest'] == 0.6
+    at_gate = wake_word.evaluate(report(TRIES, VIDEO), gate=0.09)
+    assert at_gate['detected'] == 8 and at_gate['missed']['hey_jarvis_003.wav'] == 4
+    assert not any(at_gate['false_wakes'].values()) and at_gate['plain_highest'] == 0.3
+
+
+def test_training_report_shows_the_gate_trade_off_and_the_verdict():
+    lines = train.describe(report(TRIES, VIDEO, peaks=['peak_1.wav']), gate=0.05)
+    assert '  saved background peaks (1): still accepted: peak_1.wav' in lines
+    assert '  0.09: detected 67% (8/12), false wake-ups 0' in lines
+    assert '  0.05: detected 100% (12/12), false wake-ups 2   <- in use' in lines
+    assert lines[-2].startswith('Verdict: not there yet') and 'record more of it' in lines[-1]
+    good = train.describe(report({'a.wav': [[(0.4, 0.9)]] * 10}, VIDEO), gate=0.09)
+    assert good[-1].startswith('Verdict: GOOD')
 
 
 def test_training_tool_explains_when_nothing_is_recorded(tmp_path, monkeypatch, capsys):

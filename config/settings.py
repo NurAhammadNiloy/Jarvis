@@ -30,9 +30,12 @@ WAKE_WORD_THRESHOLD = 0.5
 # False = the plain model only.
 WAKE_WORD_PERSONAL = True
 
-# The personal tuning decides from this plain-model score up (lower = it judges more of
-# what you say; your weakest real "Hey Jarvis" peaked at 0.08).
-WAKE_WORD_VERIFIER_GATE = 0.05
+# The personal tuning decides from this plain-model score up; below it the plain score
+# stands. Chosen from your recordings (22 Oct 2026, held-out, every chunk alignment): sounds
+# the tuning had not been taught yet (two phone videos) were accepted at plain scores up to
+# 0.073, while the live tries it rescued were at 0.11-0.18. 0.09 keeps about 0.02 from both;
+# 0.05 let one video through. tools/train_wake_verifier.py shows the trade-off for other values.
+WAKE_WORD_VERIFIER_GATE = 0.09
 
 # After the wake word or a finished exchange (once Jarvis stops speaking), Jarvis
 # listens without the wake word for this long, then returns to passive mode.
