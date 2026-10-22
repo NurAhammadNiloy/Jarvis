@@ -508,3 +508,31 @@ def test_prompt_treats_send_give_show_as_tell_and_admits_missing_live_informatio
     assert '"send me", "give me" and "show me" mean "tell me"' in prompt
     assert 'live information Jarvis cannot get (news, current events, web search)' in prompt
     assert 'in one short sentence and offer what you can tell from general knowledge' in prompt
+
+
+# --- 0.92-0.95 labelled "unclear audio" (193aa5d4 seq 364, 453) ---------------------------
+
+SEND_ME_IN_SHORT = heard('yes you can send me in short', 0.92825669,                           # 364
+                         ('yes you can see me in short', 0.91), ('yes you can send me in shortt', 0.93),
+                         ('yes you can send me Inn short', 0.93))
+SAID_TOLD = heard('Jarvis I said that I was told you about to say not send', 0.91632271,       # 453
+                  ('Jarvis I say that I was told you about to say not send', 0.91),
+                  ('Jarvis I said that I was told you about to say not sin', 0.88),
+                  ('Jarvis I said that I was told you about to say knot send', 0.92))
+
+
+@pytest.mark.parametrize('utterance', [SEND_ME_IN_SHORT, SAID_TOLD], ids=['yes ... send me', 'told ... not send'])
+def test_confident_conversation_is_not_unclear_audio(jarvis, utterance):
+    jarvis.hear(utterance)
+    assert jarvis.resolver.call_args.args[0]['reason'] == 'conversation'
+    assert jarvis.said() == ['Could you clarify?']   # the model's own answer, not a request to repeat
+
+
+@pytest.mark.parametrize('utterance', [
+    heard('Jarvis remind me to call Mom', 0.9, ('Jarvis remind me to call Mam', 0.9)),
+    heard('Jarvis cancel all timers', 0.95, ("Jarvis don't cancel all timers", 0.9)),
+    heard('Jarvis set an alarm at 7 am', 0.95, ('Jarvis set an alarm at 7 pm', 0.9)),
+], ids=['name', 'meaning', 'am/pm'])
+def test_requests_that_could_become_actions_still_need_agreement(jarvis, utterance):
+    jarvis.hear(utterance)
+    assert jarvis.stored() == []

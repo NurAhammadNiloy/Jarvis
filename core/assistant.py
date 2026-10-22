@@ -8,7 +8,7 @@ from core.command_engine import execute_query, run_command, understand_query
 from core.command_output import VoiceNotifications, deliver_result
 from core.command_services import CommandServices
 from core.conversation_state import ConversationState, stop_threshold
-from core.voice_policy import ConfidenceGate, stop_heard, strip_wake_word, words
+from core.voice_policy import ConfidenceGate, VoiceDecision, stop_heard, strip_wake_word, words
 from core.conversation_log import record
 from core.intent_classifier import READ_ONLY_INTENTS, route
 
@@ -145,6 +145,13 @@ class Assistant:
             record('voice_decision', decision='ignore', reason='weak_without_wake_word', text=text)
             return False
         decision = self.gate.assess(recognition, text=text)
+        if (self.dialogue is not None and decision.kind == 'clarify' and decision.reason in ('wording', 'meaning')
+                and route(text).intent == 'chat'):
+            # Alternatives that differ in a word ('send' / 'see', 'not' / 'knot') matter when an
+            # action could follow. Plain conversation (a 'yes' or 'not' in it makes the gate
+            # cautious) cannot execute anything and the model sees the alternatives, so it is
+            # answered normally instead of being labelled "unclear audio".
+            decision = VoiceDecision('accept', text=text)
         if self.dialogue is not None and decision.kind != 'stop' and not recognition.error and not recognition.truncated and text:
             # A clear command takes the fast path; only conversation, requests
             # the parser cannot understand and unclear audio go to the dialogue.
