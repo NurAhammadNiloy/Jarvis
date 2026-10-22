@@ -19,6 +19,7 @@ def resolve_dialogue(context):
     commands = ', '.join(command_names())
     response = openai.ChatCompletion.create(
         model='gpt-4o', temperature=0, max_tokens=450 if long_answer else 250,
+        response_format={'type': 'json_object'},  # JSON mode: no prose or code fences around it
         request_timeout=NETWORK_TIMEOUT_SECONDS if long_answer else 8,
         messages=[{'role': 'system', 'content': (
             'You are Jarvis in a spoken conversation. Reply naturally and briefly, in one or two short '
@@ -47,7 +48,8 @@ def resolve_dialogue(context):
             'asks for confirmation. Phrase query as the user would say it, using their words, e.g. '
             '"delete my call mom reminder" or "set an alarm for 6:30 am".'
         )}, {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}])
-    return json.loads(response['choices'][0]['message']['content'])
+    # The raw text: core.dialogue parses it, and logs it when it cannot.
+    return response['choices'][0]['message']['content']
 
 def add_to_history(role: str, content: str):
     """Add a message to conversation history."""

@@ -19,6 +19,7 @@ _DETAIL = re.compile(
     r"|everything\s+(?:about|on))\b", re.IGNORECASE)
 _REPLY_LIMIT = {'short': 500, 'long': 1500}  # characters
 CLAIM_FALLBACK = "I haven't done anything yet. What should I do?"
+MODEL_FAILED = "Sorry, I lost my train of thought. Could you say that again?"
 
 
 def answer_length(text):
@@ -49,6 +50,43 @@ def without_action_claims(reply):
     # A question ("Should I set an alarm?") never claims anything was done.
     kept = [s for s in sentences if s.rstrip().endswith('?') or not any(p.search(s) for p in _CLAIMS)]
     return ' '.join(kept).strip()
+
+
+def _shorten(reply, limit):
+    """Cut an over-long reply at the last full sentence that fits."""
+    if len(reply) <= limit:
+        return reply
+    cut = reply[:limit]
+    end = max(cut.rfind('. '), cut.rfind('? '), cut.rfind('! '))
+    return cut[:end + 1] if end > 0 else cut
+
+
+def parse_model_reply(raw):
+    """{'reply': str, 'query': str or None} from the model's text, tolerating code
+    fences, prose around the object, extra keys and a missing query."""
+    import json
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        text = str(raw).strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", '', text, flags=re.IGNORECASE)
+        try:
+            data = json.loads(text)
+        except ValueError:
+            start, end = text.find('{'), text.rfind('}')
+            if start < 0 or end <= start:
+                raise ValueError('No JSON object in the model reply')
+            data = json.loads(text[start:end + 1])
+    if not isinstance(data, dict):
+        raise ValueError('The model reply is not a JSON object')
+    reply, query = data.get('reply'), data.get('query')
+    if reply is not None and not isinstance(reply, str):
+        raise ValueError('reply is not text')
+    if isinstance(query, str) and not query.strip() or query in ('null', 'None'):
+        query = None
+    if query is not None and not isinstance(query, str):
+        raise ValueError('query is not text')
+    return {'reply': (reply or '').strip(), 'query': query}
 
 
 @dataclass(frozen=True)
@@ -113,32 +151,38 @@ class Dialogue:
             return DialogueTurn('What would you like me to do?')
         # A "yes" to a question the model asked goes back to the model, which
         # can only turn it into a proposal that needs its own confirmation.
+        from core.conversation_log import record
+        raw = None
         try:
             self.model_called = True
             length = answer_length(recognition.text)
-            result = self.resolve({'history': list(self.history), 'pending_query': pending,
+            raw = self.resolve({'history': list(self.history), 'pending_query': pending,
                 'reason': reason, 'answer_length': length, 'recognition': {'text': recognition.text,
                     'confidence': recognition.confidence,
                     'alternatives': [a.text for a in recognition.alternatives]}})
-            if not isinstance(result, dict) or set(result) != {'reply', 'query'}:
-                raise ValueError('Invalid dialogue response')
-            reply, query = result['reply'], result['query']
-            if not isinstance(reply, str) or not 0 < len(reply) <= _REPLY_LIMIT[length]:
-                raise ValueError('Invalid reply')
-            if query is not None and (not isinstance(query, str) or not 0 < len(query) <= 400):
-                raise ValueError('Invalid proposal')
-            honest = without_action_claims(reply)
-            if honest != reply:
-                from core.conversation_log import record
-                record('dialogue_claim_removed', reply=reply, kept=honest)
-                reply = honest
-            if query is not None:
+            result = parse_model_reply(raw)
+        except Exception as exc:
+            # Keep the history, but nothing from a failed turn can be proposed. The
+            # raw reply is logged, so the cause can be seen ("I couldn't work out ...").
+            record('dialogue_error', error=type(exc).__name__, detail=str(exc)[:200],
+                   raw=raw if isinstance(raw, str) else repr(raw)[:2000] if raw is not None else None)
+            return DialogueTurn(MODEL_FAILED)
+        reply, query = _shorten(result['reply'], _REPLY_LIMIT[length]), result['query']
+        honest = without_action_claims(reply)
+        if honest != reply:
+            record('dialogue_claim_removed', reply=reply, kept=honest)
+            reply = honest
+        if query is not None:
+            try:
+                if len(query) > 400:
+                    raise ValueError('Proposal too long')
                 self._validate(query)
                 return DialogueTurn(reply, proposal=query)
-            if not reply:
-                return DialogueTurn(CLAIM_FALLBACK)
-            self.asked = reply.rstrip().endswith('?')
-            return DialogueTurn(reply)
-        except Exception:
-            # Keep the history, but nothing from a failed turn can be proposed.
-            return DialogueTurn("I couldn't work out that follow-up. Could you explain what you want to change?")
+            except ValueError as exc:
+                # Not something Jarvis can run ("get today's news"): keep the answer,
+                # drop the proposal, instead of failing the whole turn.
+                record('dialogue_proposal_rejected', query=query, reason=str(exc))
+        if not reply:
+            return DialogueTurn(CLAIM_FALLBACK if honest != result['reply'] else MODEL_FAILED)
+        self.asked = reply.rstrip().endswith('?')
+        return DialogueTurn(reply)

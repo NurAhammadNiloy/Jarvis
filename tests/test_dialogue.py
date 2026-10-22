@@ -148,3 +148,66 @@ def test_reminder_operations_run_directly_without_the_model(text, method):
     resolver.assert_not_called()
     getattr(services, method).assert_called_once()
     output.assert_called_once_with('Done.')
+
+
+# --- "I couldn't work out that follow-up" (22 Oct, 13:13-13:25) ----------------------------
+# Cause: the reply was parsed with json.loads without JSON mode, and any problem with
+# the reply - including a proposal Jarvis cannot run, like "get today's news" - threw
+# the whole turn away. Now JSON mode is used, parsing is tolerant, an unusable
+# proposal is dropped while the answer is kept, and the raw reply is logged.
+
+NEWS_ANSWER = "I can't look up live news, but I can tell you about recent trends in general."
+
+
+@pytest.mark.parametrize('raw', [
+    '```json\n{"reply": "Paused.", "query": "pause the timer"}\n```',
+    'Sure! {"reply": "Paused.", "query": "pause the timer"}',
+    '{"reply": "Paused.", "query": "pause the timer", "confidence": "high"}',
+    {'reply': 'Paused.', 'query': 'pause the timer'},
+], ids=['code fence', 'prose around it', 'extra key', 'dict'])
+def test_model_replies_are_parsed_robustly(raw):
+    dialogue = Dialogue(Mock(return_value=raw), clock=lambda: 0)
+    assert dialogue.turn(Recognition('pause the timer', 0.88)).proposal == 'pause the timer'
+
+
+def test_missing_or_empty_query_is_no_proposal():
+    for raw in ('{"reply": "Hello."}', '{"reply": "Hello.", "query": ""}', '{"reply": "Hello.", "query": "null"}'):
+        turn = Dialogue(Mock(return_value=raw), clock=lambda: 0).turn(Recognition('hi', 0.9))
+        assert turn.reply == 'Hello.' and not turn.proposal
+
+
+def test_an_unusable_proposal_keeps_the_answer(monkeypatch):
+    events = []
+    monkeypatch.setattr('core.conversation_log.record', lambda event, **fields: events.append((event, fields)))
+    raw = '{"reply": "%s", "query": "get today\'s news"}' % NEWS_ANSWER
+    turn = Dialogue(Mock(return_value=raw), clock=lambda: 0).turn(Recognition("give me today's news", 0.84))
+    assert turn.reply == NEWS_ANSWER and not turn.proposal
+    assert ('dialogue_proposal_rejected', {'query': "get today's news", 'reason': 'Unsupported proposal'}) in events
+
+
+def test_an_unparseable_reply_is_logged_raw(monkeypatch):
+    events = []
+    monkeypatch.setattr('core.conversation_log.record', lambda event, **fields: events.append((event, fields)))
+    turn = Dialogue(Mock(return_value='I think you want to pause it.'), clock=lambda: 0).turn(
+        Recognition('Falls the pasta timer', 0.6))
+    assert turn.reply == "Sorry, I lost my train of thought. Could you say that again?" and not turn.proposal
+    (event, fields), = [e for e in events if e[0] == 'dialogue_error']
+    assert fields['raw'] == 'I think you want to pause it.' and fields['error'] == 'ValueError'
+
+
+def test_dialogue_requests_json_mode():
+    import json as _json
+    from unittest.mock import patch
+    from core import chatgpt_service
+    reply = {'choices': [{'message': {'content': _json.dumps({'reply': 'Fine.', 'query': None})}}]}
+    with patch.object(chatgpt_service.openai.ChatCompletion, 'create', return_value=reply) as create:
+        raw = chatgpt_service.resolve_dialogue({'history': []})
+    assert create.call_args.kwargs['response_format'] == {'type': 'json_object'}
+    assert _json.loads(raw) == {'reply': 'Fine.', 'query': None}
+
+
+def test_an_over_long_reply_is_cut_at_a_sentence():
+    long_reply = 'One sentence here. ' * 40
+    turn = Dialogue(Mock(return_value={'reply': long_reply, 'query': None}), clock=lambda: 0).turn(
+        Recognition('what is it', 0.9))
+    assert len(turn.reply) <= 500 and turn.reply.endswith('.')
