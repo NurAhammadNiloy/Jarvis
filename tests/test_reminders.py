@@ -15,9 +15,6 @@ import pytest
 from core import conversation_context
 from core.command_engine import execute_query
 
-# Baseline only: written before the reminder rebuild; removed once it lands.
-pytestmark = pytest.mark.xfail(reason='reminder rebuild pending', strict=False)
-
 TZ = ZoneInfo('Europe/Helsinki')
 NOW = datetime(2026, 10, 22, 14, 0, tzinfo=TZ)
 
@@ -392,3 +389,44 @@ def test_migrates_legacy_json_once_and_keeps_the_file(tmp_path, clock, spoken):
     again = ReminderStore(db, legacy_json=legacy, zone=TZ)
     assert again.migrated == 0
     assert len(again.all()) == 3
+
+
+# --- voice follow-ups: the answer completes the original request -----------------
+
+@pytest.mark.parametrize('first, question, answer, confirmation', [
+    ('remind me to call mom', 'When should I remind you?', 'tomorrow at 9 pm',
+     'Reminder set for tomorrow at 9:00 PM: call mom.'),
+    ('remind me to call mom at 5', 'Did you mean 5 a.m. or p.m.?', 'p.m.',
+     'Reminder set for today at 5:00 PM: call mom.'),
+    ('set an alarm', 'What time should I set the alarm for?', '7am',
+     'Alarm set for tomorrow at 7:00 AM.'),
+])
+def test_voice_follow_up_completes_the_request(services, service, first, question, answer, confirmation):
+    from core.assistant import Assistant
+    from core.voice_policy import Recognition
+    output = Mock()
+    speech = Mock()
+    speech.is_speaking.return_value = False
+    assistant = Assistant(Mock(), speech, services, output, clock=lambda: 0)
+    assistant.process_recognition(Recognition(first, .95))
+    output.assert_called_with(question)
+    assert pending(service) == []
+    assistant.process_recognition(Recognition(answer, .95))
+    output.assert_called_with(confirmation)
+    assert len(pending(service)) == 1
+
+
+@pytest.mark.parametrize('phrase, message', [
+    ('remind me to pay rent on December 20 at 9 am', 'Reminder set for Sunday, December 20 at 9:00 AM: pay rent.'),
+    ('remind me to drink water every hour', 'Reminder set for every hour on the hour, next today at 3:00 PM: drink water.'),
+    ('remind me to water plants every day at 8 am', 'Reminder set for every day at 8:00 AM: water plants.'),
+])
+def test_confirmation_wording(services, phrase, message):
+    assert say(services, phrase).messages == (message,)
+
+
+def test_long_choice_lists_are_shortened(services):
+    for hour in range(15, 22):
+        say(services, f'remind me to stretch at {hour}:00')
+    text = say(services, 'delete my stretch reminder').messages[0]
+    assert 'I found 7 reminders' in text and 'and 2 more' in text

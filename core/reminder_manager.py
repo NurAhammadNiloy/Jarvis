@@ -80,7 +80,8 @@ def describe(reminder, now):
         weekday = reminder.due.weekday() if reminder.weekday is None else reminder.weekday
         return f"every {WEEKDAYS[weekday].title()} at {clock_text(reminder.due)}"
     if reminder.recurrence == 'hourly':
-        return f"every hour at {reminder.due:%M} past, next {describe_when(reminder.due, now)}"
+        minute = 'on the hour' if reminder.due.minute == 0 else f"at {reminder.due.minute} minutes past"
+        return f"every hour {minute}, next {describe_when(reminder.due, now)}"
     return describe_when(reminder.due, now)
 
 
@@ -187,6 +188,7 @@ class ReminderService:
         self._changed()
         reminder = self.store.get(reminder_id)
         when = describe(reminder, self.now())
+        when = when[3:] if when.startswith('on ') else when  # "set for Sunday", not "for on Sunday"
         if reminder.kind == 'alarm':
             return ActionResult((f"Alarm set for {when}." + (f" {reminder.text}." if reminder.text else ''),))
         return ActionResult((f"Reminder set for {when}: {reminder.text}.",))
@@ -270,7 +272,9 @@ class ReminderService:
 
     def _which(self, matches, noun, verb):
         now = self.now()
-        options = '; '.join(f"{label(r)}, {describe(r, now)}" for r in matches)
+        options = '; '.join(f"{label(r)}, {describe(r, now)}" for r in matches[:5])
+        if len(matches) > 5:
+            options += f"; and {len(matches) - 5} more"
         return ActionResult((f"I found {len(matches)} {noun}s: {options}. Which one should I {verb}? "
                              f"Please say it again with the day or time.",), False, pending=True)
 

@@ -208,18 +208,25 @@ def test_list_reminders_uses_the_reminder_listing():
     services.reminder.assert_not_called()
 
 
-@pytest.mark.parametrize('phrase, intent', [
-    ('delete my dentist reminder', 'delete_reminder'),
-    ('snooze that reminder', 'snooze_reminder'),
-    ('set an alarm for 7am', 'alarm'),
-])
-def test_unsupported_operations_say_so_and_do_nothing(phrase, intent):
+def test_delete_and_snooze_reach_the_reminder_service():
     services = action_services()
-    result = execute_query(phrase, services)
-    assert (result.status, result.intent, result.messages) == ('error', intent, ("I can't do that yet.",))
-    assert result.legacy_value() is False
-    for method in ('reminder', 'list_reminders', 'timer_action', 'chat'):
-        getattr(services, method).assert_not_called()
+    services.delete_reminder.return_value = ActionResult(('Deleted.',))
+    services.snooze_reminder.return_value = ActionResult(('Snoozed.',))
+    assert execute_query('delete my dentist reminder', services).messages == ('Deleted.',)
+    services.delete_reminder.assert_called_once_with('dentist', 'delete my dentist reminder')
+    assert execute_query('snooze it for 15 minutes', services).messages == ('Snoozed.',)
+    services.snooze_reminder.assert_called_once_with(None, 15, 'snooze it for 15 minutes')
+    services.chat.assert_not_called()
+
+
+@pytest.mark.parametrize('phrase, operation', [
+    ('cancel my alarm', 'delete'), ('turn off the 7am alarm', 'delete'),
+    ('what alarms do I have', 'list'), ('set an alarm for 7am', 'create'),
+])
+def test_alarm_operations(phrase, operation):
+    command = understand_query(phrase, RoutingServices())
+    assert command.intent == 'alarm'
+    assert command.arguments['operation'] == operation
 
 
 def test_twenty_five_minute_timer_runs_for_twenty_five_minutes(tmp_path, monkeypatch):

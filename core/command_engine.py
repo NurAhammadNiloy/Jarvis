@@ -1,6 +1,7 @@
 """Plain-text understanding and execution, independent of speech delivery."""
 from datetime import datetime, timedelta
 import random
+import re
 
 from config.settings import DEFAULT_LOCATION
 from core.command_result import Command, CommandResult
@@ -8,8 +9,10 @@ from core.command_services import CommandServices
 from core.intent_classifier import route
 from core.service_errors import ServiceError
 
-# Routed so they never fall through to chat, but there is no backend yet.
-UNSUPPORTED = ("delete_reminder", "snooze_reminder", "alarm")
+# The alarm intent covers every alarm request; these pick the operation.
+_ALARM_CANCEL = re.compile(r"\b(?:cancel|delete|remove|clear|drop|disable|stop|turn\s+off|switch\s+off)\b", re.IGNORECASE)
+_ALARM_LIST = re.compile(r"^\W*(?:what|which|list|show|tell|read|check|any|do\s+i\s+have|have\s+i\s+got|are\s+there)\b",
+                         re.IGNORECASE)
 
 # Timer intents and the action name CommandServices.timer_action expects.
 TIMER_ACTIONS = {
@@ -26,6 +29,18 @@ def understand_query(query, services, default_location=DEFAULT_LOCATION):
     args = dict(routed.fields)
     if intent == "create_reminder":
         args = services.extract_reminder_info(query)
+    elif intent == "alarm":
+        if _ALARM_CANCEL.search(query):
+            args = {"operation": "delete", "when_text": query}
+        elif _ALARM_LIST.search(query):
+            args = {"operation": "list"}
+        else:
+            args = dict(services.extract_reminder_info(query), kind="alarm", operation="create")
+    elif intent == "delete_reminder":
+        args["when_text"] = query
+    elif intent == "snooze_reminder":
+        from core.reminder_parser import snooze_minutes
+        args.update(minutes=snooze_minutes(query), when_text=query)
     elif intent in TIMER_ACTIONS:
         args = dict(services.extract_timer_info(query), action=TIMER_ACTIONS[intent])
     elif intent == "weather":
@@ -63,7 +78,11 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         return reply(*action.messages, status="handled" if action.succeeded else "error",
                      legacy_handled=True)
 
-    if intent in ("reminder", "create_reminder"):
+    if intent == "alarm" and args.get("operation") == "delete":
+        return action_reply(services.delete_reminder(None, args["when_text"], kind="alarm"))
+    if intent == "alarm" and args.get("operation") == "list":
+        return action_reply(services.list_reminders(kind="alarm"))
+    if intent in ("reminder", "create_reminder", "alarm"):
         task, due, question = args.get('task'), args.get('due'), args.get('question')
         if due is not None:
             return action_reply(services.reminder(args))
@@ -77,8 +96,11 @@ boundary. Clock and response choice can be fixed for deterministic tests.
         return reply("I couldn't understand the reminder. Please try again with a task and time.", status="error")
     if intent == "list_reminders":
         return action_reply(services.list_reminders())
-    if intent in UNSUPPORTED:
-        return reply("I can't do that yet.", status="error", error="unsupported")
+    if intent == "delete_reminder":
+        return action_reply(services.delete_reminder(args.get("target"), args.get("when_text", "")))
+    if intent == "snooze_reminder":
+        return action_reply(services.snooze_reminder(args.get("target"), args.get("minutes", 10),
+                                                     args.get("when_text", "")))
     if intent in ("weather", "forecast"):
         if not args['city']:
             return reply("I couldn't determine your location. Please tell me the city for the weather update.")

@@ -73,8 +73,8 @@ class Dialogue:
                 raise ValueError('Invalid proposal')
             if query is not None:
                 intent = route(query).intent
-                if (intent in {'delete_reminder', 'snooze_reminder'} or FAMILIES.get(intent, intent)
-                        not in {'reminder', 'timer', 'weather', 'forecast', 'time', 'date', 'youtube', 'google'}):
+                if FAMILIES.get(intent, intent) not in {'reminder', 'alarm', 'timer', 'weather', 'forecast',
+                                                        'time', 'date', 'youtube', 'google'}:
                     raise ValueError('Unsupported proposal')
                 if ConfidenceGate(self.clock).assess(Recognition(query, 1.0)).kind != 'accept':
                     raise ValueError('Unsafe proposal')

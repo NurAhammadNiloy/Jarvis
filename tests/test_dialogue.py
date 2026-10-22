@@ -54,9 +54,7 @@ def test_cancel_and_expiration_invalidate_proposal():
 
 
 @pytest.mark.parametrize('response', [None, {'reply': 'done', 'query': 'delete all files'},
-    {'reply': 'done', 'query': "don't cancel all timers"},
-    {'reply': 'done', 'query': 'delete my dentist reminder'},
-    {'reply': 'done', 'query': 'set an alarm for 7am'}])
+    {'reply': 'done', 'query': "don't cancel all timers"}])
 def test_malformed_or_unsafe_model_proposals_cannot_execute(response):
     dialogue = Dialogue(Mock(return_value=response), clock=lambda: 0)
     assert not dialogue.turn(Recognition('something', .9)).query
@@ -96,14 +94,25 @@ def test_assistant_routes_confirmed_repair_through_existing_boundary():
     assert any(h['text'] == 'Reminder set.' for h in assistant.dialogue.history)
 
 
-@pytest.mark.parametrize('text', ['delete my dentist reminder', 'snooze that reminder'])
-def test_unsupported_reminder_operations_are_refused_without_the_model(text):
+@pytest.mark.parametrize('query', ['delete my dentist reminder', 'snooze that reminder', 'set an alarm for 7am'])
+def test_reminder_and_alarm_proposals_need_spoken_confirmation(query):
+    dialogue = Dialogue(Mock(return_value={'reply': 'Ready', 'query': query}), clock=lambda: 0)
+    turn = dialogue.turn(Recognition('something', .9))
+    assert not turn.query and query in turn.reply and dialogue.pending == query
+    assert dialogue.turn(Recognition('yes', .95)).query == query
+
+
+@pytest.mark.parametrize('text, method', [('delete my dentist reminder', 'delete_reminder'),
+                                          ('snooze that reminder', 'snooze_reminder')])
+def test_reminder_operations_run_directly_without_the_model(text, method):
     resolver = Mock()
     services = Mock(spec=CommandServices)
     services.follow_up.return_value = None
+    getattr(services, method).return_value = ActionResult(('Done.',))
     output = Mock()
     assistant = Assistant(Mock(), Mock(), services, output, clock=lambda: 0,
         dialogue=Dialogue(resolver, clock=lambda: 0))
     assistant.process_recognition(Recognition(text, .95))
     resolver.assert_not_called()
-    output.assert_called_once_with("I can't do that yet.")
+    getattr(services, method).assert_called_once()
+    output.assert_called_once_with('Done.')

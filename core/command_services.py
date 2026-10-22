@@ -83,6 +83,12 @@ class CommandServices:
     def list_reminders(self, kind=None):
         return self.reminders.list_reminders(kind)
 
+    def delete_reminder(self, target, when_text='', kind=None):
+        return self.reminders.delete(target, when_text, kind)
+
+    def snooze_reminder(self, target, minutes=10, when_text=''):
+        return self.reminders.snooze(target, minutes, when_text)
+
     def timer_action(self, action, query, info):
         messages = []
         kwargs = {"label": info.get("label"), "respond": messages.append}

@@ -27,7 +27,7 @@ def resolve_dialogue(context):
             'Return ONLY JSON with exactly reply (string) and query (string or null). '
             'For conversation or a missing/uncertain detail use query null. For a complete requested '
             'action, query is a standalone plain-text command for confirmation. Supported actions '
-            'are reminders, timers, weather, date/time, YouTube and opening Google. '
+            'are reminders (create, delete, snooze), alarms, timers, weather, date/time, YouTube and opening Google.  '
             'Do not propose unsupported actions. For a reminder preserve task, time and recurrence. '
             'If the user changes topic, answer that topic; do not force the pending request.'
         )}, {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}])

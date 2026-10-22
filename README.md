@@ -10,7 +10,7 @@ A sophisticated voice-activated AI assistant inspired by Iron Man's J.A.R.V.I.S.
 ## ✨ Features
 
 ### Voice Interaction
-- **Wake Word Detection** - Requires a leading "Jarvis"
+- **Wake Word Detection** - Requires a leading "Jarvis" (checked on the cloud transcript; there is no on-device wake-word detector yet)
 - **Voice Activity Detection (VAD)** - Continuous capture with 1.4-second silence endpointing
 - **Speech Recognition** - Google Speech Recognition with preserved transcripts and clarification for uncertain commands
 - **Interruptible Speech** - Queued Google Cloud TTS and cancellable PCM playback; listening continues during responses
@@ -19,21 +19,33 @@ See [voice interaction architecture and live-testing limits](docs/voice-interact
 
 ### Supported Commands
 
-| Command | Example |
-|---------|---------|
-| **Reminders** | "Remind me to call mom at 5pm" |
-| **Weather** | "What's the weather like today?" |
+| Command | Examples |
+|---------|----------|
+| **Create reminders** | "Remind me to call mom tomorrow at 9 pm", "Remind me to take a break in one hour", "Remind me to pay rent on December 20 at 9 am" |
+| **Recurring reminders** | "Remind me to water plants every day at 8 am", "Remind me about standup every Monday at 9", "Remind me to drink water every hour" |
+| **List reminders** | "What are my reminders?" |
+| **Delete reminders** | "Delete my dentist reminder", "Delete the call mom reminder tomorrow at 9 pm" |
+| **Snooze reminders** | "Snooze it for 10 minutes", "Snooze that reminder" (10 minutes), "Snooze the cat reminder for 20 minutes" |
+| **Alarms** | "Set an alarm for 7am", "Wake me up at 6:30", "Set an alarm for 7 AM every day", "Cancel my alarm", "What alarms do I have?" |
+| **Timers** | "Set a timer for twenty five minutes", "Pause the pasta timer", "Unpause the pasta timer", "How much time is left?", "Start a pomodoro" |
+| **Weather** | "What's the weather like today?", "Weather in Helsinki", "What's the forecast for Athens?" |
 | **YouTube** | "Play lofi music on YouTube" |
 | **Time** | "What time is it?" |
-| **Date** | "What's today's date?" |
-| **Web Search** | "Open Google" |
-| **General Chat** | Any question (falls back to ChatGPT) |
+| **Date** | "What's today's date?", "What's the date day after tomorrow?" |
+| **Open Google** | "Open Google" (opens the page; there is no search-results workflow) |
+| **General Chat** | Anything else goes to ChatGPT |
 
-### Advanced Capabilities
-- **Contextual Reminders** - Natural language date/time parsing with recurring support
-- **Memory System** - SQLite-based conversation history with short-term and long-term storage
-- **User Preferences** - Persistent settings across sessions
-- **Speech Output** - Short synthesis chunks and serialized speech/chime playback
+### Reminders and Alarms
+- **One parse, one datetime** - The time is parsed once (regex plus `dateparser` for calendar dates) into a timezone-aware datetime; no NLP model is loaded.
+- **Asks instead of guessing** - Missing times ("remind me to call mom") and ambiguous ones ("at 5" - a.m. or p.m.?) get a question; your answer completes the original request. A bare 7-11 is read as morning and 12 as noon.
+- **Stored in SQLite** - `data/reminders.db`; each reminder has a stable id, so two reminders with the same text are independent. On first start, `data/reminders.json` is imported once and left in place.
+- **One scheduler** - A single background thread fires reminders on time, survives restarts, and announces anything that fell due while Jarvis was off once at startup.
+- **By id** - Delete and snooze act on exactly one reminder; if a name matches several, Jarvis reads them back with their times and asks which one.
+- **Time zone** - The system zone by default; set `TIMEZONE` in `config/settings.py` (e.g. `"Europe/Helsinki"`) to override.
+
+### Not Implemented Yet
+- **Memory and preferences** - `core/memory_manager.py` exists, but the running assistant does not store or read conversation memory or preferences.
+- **Web search**, **climate/room monitoring** and **system status** checks.
 
 ---
 
@@ -41,27 +53,29 @@ See [voice interaction architecture and live-testing limits](docs/voice-interact
 
 ```
 Jarvis/
-├── main.py                    # Entry point
+├── main.py                    # Entry point: starts reminders, then the voice loop
 ├── core/
-│   ├── assistant.py           # Main conversation loop & wake word detection
-│   ├── intent_classifier.py   # Keyword-based intent classification
-│   ├── intent_handler.py      # Routes intents to handlers
-│   ├── voice_recognition.py   # Speech-to-text with VAD
+│   ├── assistant.py           # Conversation loop, wake word and confidence decisions
+│   ├── intent_classifier.py   # Ordered word-boundary routing table
+│   ├── command_engine.py      # Understand + execute text commands -> CommandResult
+│   ├── command_services.py    # Adapters to weather, YouTube, timers, reminders, chat
+│   ├── dialogue.py            # Conversational repair; model proposals need a spoken "yes"
+│   ├── reminder_parser.py     # Reminder/alarm text -> timezone-aware datetime
+│   ├── reminder_store.py      # SQLite storage (data/reminders.db) + JSON migration
+│   ├── reminder_manager.py    # Scheduler thread; create/list/delete/snooze by id
+│   ├── smart_timer.py         # Timers and pomodoro
+│   ├── voice_*.py             # Capture, VAD, recognition and voice policy
 │   ├── speech_synthesis.py    # Text-to-speech with SSML
 │   ├── chatgpt_service.py     # OpenAI GPT-4o integration
 │   ├── weather_service.py     # OpenWeatherMap integration
-│   ├── youtube_service.py     # YouTube Data API
-│   ├── memory_manager.py      # SQLite conversation storage
-│   └── reminder_manager.py    # Reminder scheduling
+│   └── youtube_service.py     # YouTube Data API
 ├── config/
-│   ├── api_keys.py            # API key configuration
-│   └── credentials.py         # Google Cloud credentials
+│   ├── api_keys.py            # API keys from .env
+│   ├── credentials.py         # Google Cloud credentials (GOOGLE_CLOUD_CREDENTIALS)
+│   └── settings.py            # Default city, network timeout, time zone
 ├── utils/
-│   ├── audio_utils.py         # Audio playback
-│   ├── nlp_utils.py           # Entity extraction (spaCy)
-│   └── text_utils.py          # Text processing
-└── data/
-    └── memory.db              # SQLite database
+│   └── audio_utils.py         # Audio playback
+└── data/                      # Runtime data (gitignored): reminders.db, memory.db
 ```
 
 ### Flow
@@ -75,6 +89,7 @@ Continuous microphone → Frame VAD → Final Google recognition
                               TTS queue → Cancellable PCM playback
 
 Microphone → Separate interruption recognition → Cancel current speech
+Reminder scheduler thread → Spoken reminder or alarm
 ```
 
 ---
@@ -119,26 +134,26 @@ source env/bin/activate
 ### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
-
-# Download spaCy language model
-python -m spacy download en_core_web_trf
 ```
+
+No spaCy language model download is needed: the running assistant does not use spaCy.
 
 ### 4. Configure API Keys
 
-Create a `.env` file in the project root:
+Copy `.env.example` to `.env` in the project root and fill in the values:
 ```env
 OPENAI_API_KEY=your_openai_api_key
 YOUTUBE_API_KEY=your_youtube_api_key
 WEATHER_API_KEY=your_openweathermap_api_key
 GOOGLE_API_KEY=your_google_api_key
+GOOGLE_CLOUD_CREDENTIALS=C:/path/to/your-service-account.json
 ```
 
 Set up Google Cloud credentials:
 1. Create a Google Cloud project
 2. Enable Text-to-Speech API
 3. Create a service account and download the JSON key
-4. Update the path in `config/credentials.py`
+4. Set `GOOGLE_CLOUD_CREDENTIALS` in `.env` to the key file's path
 
 ---
 
@@ -150,15 +165,18 @@ python main.py
 ```
 
 ### How It Works
-1. Jarvis listens passively for the wake word **"Jarvis"**
-2. Once activated, speak your command
-3. Jarvis processes and responds with synthesized speech
-4. Conversation stays active for 2 minutes before returning to passive mode
+1. Jarvis starts the reminder scheduler and announces any reminders missed while it was off
+2. Jarvis listens passively for the wake word **"Jarvis"**
+3. Once activated, speak your command
+4. Jarvis processes and responds with synthesized speech
+5. Conversation stays active for 2 minutes before returning to passive mode
 
 ### Example Commands
 ```
 "Jarvis, what's the weather like?"
 "Jarvis, remind me to take a break in 30 minutes"
+"Jarvis, what are my reminders?"
+"Jarvis, set an alarm for 7am"
 "Jarvis, play relaxing music on YouTube"
 "Jarvis, what time is it?"
 "Jarvis, tell me a joke"
@@ -168,36 +186,23 @@ python main.py
 
 ## 🧪 Testing
 
-Run the isolated command-boundary and voice tests (no microphone, TTS, or API calls):
+Run the isolated tests (no microphone, TTS, API calls or real data files):
 
 ```bash
-python -B -m pytest tests -q -p no:cacheprovider
+python -B -m pytest -q
 ```
+
+`pytest.ini` limits collection to `tests/`. Reminder tests use a frozen clock and a temporary database, so nothing waits in real time.
 
 Plain-text execution returns structured results through
 `core.command_engine.execute_query()`. See [command boundary documentation](docs/command-boundary.md)
 for service injection, output adapters, and compatibility details.
 
-The older integration suite below is not isolated and can write to the real
-memory database or invoke external services:
-```bash
-pytest full_test.py
-```
-
-Individual test files:
-- `test_memory.py` - Memory system tests
-- `test_climate_control.py` - Climate control tests
-- `test_voice_recogination.py` - Voice recognition tests
+The root-level `test_*.py` and `full_test.py` scripts are older experiments, not part of the suite. They can load models, call external services or write to the real memory database.
 
 ---
 
 ## 📁 Key Components
-
-### Memory Manager
-- **Short-term memory**: Last 5 conversations (in-memory)
-- **Long-term memory**: SQLite database for conversation history
-- **User preferences**: Persistent settings storage
-- **Session data**: Temporary state management
 
 ### Speech Synthesis
 - Escaped SSML with configurable voice, rate and pitch
@@ -205,13 +210,8 @@ Individual test files:
 - Cancellable playback with a shared audio queue
 - Continuous microphone capture during output (speaker echo still requires live validation)
 
-### Intent Classification
-Keyword-based classification with support for:
-- Reminder management (set, list, delete, snooze)
-- Weather queries
-- YouTube playback
-- Time and date queries
-- General conversation (ChatGPT fallback)
+### Intent Routing
+An ordered table of word-boundary rules in `core/intent_classifier.py`; the first match wins and anything unmatched goes to ChatGPT. Operations on existing things are checked first (snooze/delete/list reminders before creating one, resume before pause).
 
 ---
 
