@@ -11,8 +11,11 @@ def main():
     
     # Reminder restoration is an explicit voice-runtime startup action.
     from core.reminder_manager import initialize_reminders
-    initialize_reminders()
+    reminders = initialize_reminders()
     assistant = Assistant()
+    summary = reminders.startup_summary()
+    if summary:
+        assistant.output(summary)  # printed by the transcript and spoken
     
     try:
         while True:

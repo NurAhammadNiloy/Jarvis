@@ -443,3 +443,54 @@ def test_long_choice_lists_are_shortened(services):
         say(services, f'remind me to stretch at {hour}:00')
     text = say(services, 'delete my stretch reminder').messages[0]
     assert 'I found 7 reminders' in text and 'and 2 more' in text
+
+
+# --- startup summary ------------------------------------------------------------------
+
+def test_startup_summary(services, service):
+    assert service.startup_summary() == ''
+    say(services, 'set an alarm for 11:26 am')
+    assert service.startup_summary() == 'You have 1 pending: alarm today at 11:26 AM.' or \
+        service.startup_summary() == 'You have 1 pending: alarm tomorrow at 11:26 AM.'
+    say(services, "remind me to drink water at 6 pm")
+    summary = service.startup_summary()
+    assert summary.startswith('You have 2 pending: ') and "reminder 'drink water' today at 6:00 PM" in summary
+
+
+def test_startup_summary_with_many_gives_count_and_next(services, service):
+    for hour in range(15, 20):
+        say(services, f'remind me to stretch at {hour}:00')
+    assert service.startup_summary() == "You have 5 pending. The next is reminder 'stretch' today at 3:00 PM."
+
+
+def test_main_speaks_the_summary_after_restoring(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    import sys
+    import types
+    from core import conversation_log, reminder_manager
+    monkeypatch.setattr(conversation_log, 'start_logging', lambda: 'test-log')
+    monkeypatch.setattr(conversation_log, 'record', Mock())
+    monkeypatch.setattr(conversation_log, '_listeners', [])
+    spoken = []
+
+    class Assistant:
+        output = staticmethod(spoken.append)
+
+        def wait_for_wake_word(self):
+            raise StopIteration()
+
+        def close(self):
+            pass
+    fake = types.ModuleType('core.assistant')
+    fake.Assistant = Assistant
+    monkeypatch.setitem(sys.modules, 'core.assistant', fake)
+    service = Mock()
+    service.startup_summary.return_value = 'You have 1 pending: alarm today at 11:26 AM.'
+    monkeypatch.setattr(reminder_manager, 'initialize_reminders', lambda: service)
+    spec = importlib.util.spec_from_file_location('test_main_summary', Path(__file__).resolve().parents[1] / 'main.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with pytest.raises(StopIteration):
+        module.main()
+    assert spoken == ['You have 1 pending: alarm today at 11:26 AM.']

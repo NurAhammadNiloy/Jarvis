@@ -197,6 +197,21 @@ class ReminderService:
         self.store.set_status(reminder_id, 'done')
         self._changed()
 
+    def startup_summary(self, limit=3):
+        """One sentence about what is pending, or '' (read-only; nothing is changed)."""
+        now = self.now()
+        items = self.store.pending()
+        if not items:
+            return ''
+
+        def part(r):
+            what = 'alarm' if r.kind == 'alarm' and not r.text else (
+                f"alarm '{r.text}'" if r.kind == 'alarm' else f"reminder '{r.text or 'reminder'}'")
+            return f"{what} {describe(r, now)}"
+        if len(items) > limit:
+            return f"You have {len(items)} pending. The next is {part(items[0])}."
+        return f"You have {len(items)} pending: " + ', '.join(part(r) for r in items) + '.'
+
     def list_reminders(self, kind=None):
         now = self.now()
         items = [r for r in self.store.pending() if kind in (None, r.kind)]

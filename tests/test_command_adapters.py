@@ -134,7 +134,9 @@ def test_main_restores_reminders_before_listening(monkeypatch):
     fake_assistant = types.ModuleType('core.assistant')
     fake_assistant.Assistant = Assistant
     monkeypatch.setitem(sys.modules, 'core.assistant', fake_assistant)
-    monkeypatch.setattr(reminder_manager, 'initialize_reminders', lambda: events.append('restore'))
+    service = Mock()
+    service.startup_summary.return_value = ''
+    monkeypatch.setattr(reminder_manager, 'initialize_reminders', lambda: events.append('restore') or service)
     spec = importlib.util.spec_from_file_location('test_main_entry', Path(__file__).resolve().parents[1] / 'main.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
