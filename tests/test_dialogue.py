@@ -1,3 +1,4 @@
+from datetime import datetime
 from unittest.mock import Mock
 
 import pytest
@@ -78,7 +79,9 @@ def test_assistant_routes_confirmed_repair_through_existing_boundary():
     ])
     services = Mock(spec=CommandServices)
     services.follow_up.return_value = None
-    services.extract_reminder_info.return_value = dict(task='call Anne', time='tomorrow at 9 am', recurring=False, interval=None)
+    request = dict(task='call Anne', due=datetime(2026, 10, 23, 9, 0), recurrence='none', weekday=None,
+                   kind='reminder', question=None)
+    services.extract_reminder_info.return_value = request
     services.reminder.return_value = ActionResult(('Reminder set.',))
     speech, output = Mock(), Mock()
     assistant = Assistant(Mock(), speech, services, output, clock=lambda: 0,
@@ -87,7 +90,7 @@ def test_assistant_routes_confirmed_repair_through_existing_boundary():
     assistant.process_recognition(Recognition('Anne tomorrow at 9 am', .9))
     services.reminder.assert_not_called()
     assistant.process_recognition(Recognition('yes', .95))
-    services.reminder.assert_called_once_with('call Anne', 'tomorrow at 9 am', False, None)
+    services.reminder.assert_called_once_with(request)
     assistant.process_recognition(Recognition('yes', .95))
     services.reminder.assert_called_once()
     assert any(h['text'] == 'Reminder set.' for h in assistant.dialogue.history)

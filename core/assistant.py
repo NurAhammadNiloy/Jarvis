@@ -127,17 +127,14 @@ class Assistant:
         self.speech.stop()  # Supersede queued old responses, not domain actions.
         query = decision.text
         if self.pending_reminder:
-            info = self.services.extract_reminder_info(query)
-            if not info.get('time'):
-                self.output("I couldn't understand that time. Could you say it again?")
-                return True
-            query = f"remind me to {self.pending_reminder['task']} at {info['time']}"
+            # The answer completes the original request, which is parsed once.
+            query = f"{self.pending_reminder['query']} {query}"
         record('command_started', text=query)
         result = execute_query(query, self.services)
         record('command_result', status=result.status, intent=result.intent, messages=list(result.messages),
                pending_action=result.pending_action)
         if result.pending_action == 'reminder_time':
-            self.pending_reminder = {'task': result.data['task']}
+            self.pending_reminder = {'query': result.data.get('query') or f"remind me to {result.data['task']}"}
         elif result.status != 'error':
             self.pending_reminder = None
         deliver_result(result, self.output)

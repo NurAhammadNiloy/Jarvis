@@ -117,7 +117,8 @@ def test_reminder_response_and_delayed_notification(reminders, monkeypatch):
     notifications = []
     services = CommandServices(TextNotifications(notifications.append))
     monkeypatch.setattr(services, 'extract_reminder_info', lambda q: {
-        'task': 'call mom', 'time': 'in 5 minutes', 'recurring': False, 'interval': None,
+        'task': 'call mom', 'due': datetime.now() + timedelta(minutes=5), 'recurrence': 'none',
+        'weekday': None, 'kind': 'reminder', 'question': None,
     })
     result = execute_query('remind me to call mom in 5 minutes', services)
     assert result.status == 'handled'
@@ -128,14 +129,6 @@ def test_reminder_response_and_delayed_notification(reminders, monkeypatch):
     assert notifications == ['Sir, this is your reminder: call mom']
     with open(manager.REMINDER_FILE) as stream:
         assert json.load(stream)[0]['completed'] is True
-
-
-def test_reminder_parse_failure_does_not_schedule(reminders):
-    manager, timer = reminders
-    result = CommandServices().reminder('task', 'not a date', False, None)
-    assert not result.succeeded
-    assert len(result.messages) == 1
-    timer.assert_not_called()
 
 
 def test_restoration_is_explicit_idempotent_and_uses_selected_output(reminders):

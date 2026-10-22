@@ -61,12 +61,16 @@ boundary. Clock and response choice can be fixed for deterministic tests.
                      legacy_handled=True)
 
     if intent in ("reminder", "create_reminder"):
-        task, time = args['task'], args['time']
-        if task and time:
-            return action_reply(services.reminder(task, time, args['recurring'], args['interval']))
+        task, due, question = args.get('task'), args.get('due'), args.get('question')
+        if due is not None:
+            return action_reply(services.reminder(args))
+        if question:
+            # Ambiguous time: keep the whole request so the answer can complete it.
+            return reply(question, status="pending", pending_action="reminder_time",
+                         data={"task": task, "query": query})
         if task:
-            return reply(f"I heard the task '{task}', but when would you like me to remind you?",
-                         status="pending", pending_action="reminder_time", data={"task": task})
+            return reply("When should I remind you?", status="pending",
+                         pending_action="reminder_time", data={"task": task})
         return reply("I couldn't understand the reminder. Please try again with a task and time.", status="error")
     if intent == "list_reminders":
         return action_reply(services.list_reminders())

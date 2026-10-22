@@ -40,7 +40,8 @@ def services():
     fake.youtube.return_value = 'https://www.youtube.com/watch?v=example'
     fake.thanks.side_effect = lambda choose: choose(['You are welcome.', 'Anytime.'])
     fake.extract_reminder_info.return_value = {
-        'task': 'call mom', 'time': '5pm', 'recurring': False, 'interval': None,
+        'task': 'call mom', 'due': datetime(2026, 9, 9, 17, 0), 'recurrence': 'none',
+        'weekday': None, 'kind': 'reminder', 'question': None,
     }
     fake.extract_timer_info.return_value = {'action': 'set', 'label': 'Pasta', 'duration': (300, '5 minutes')}
     fake.reminder.return_value = ActionResult(('Reminder set.',))
@@ -69,11 +70,11 @@ def test_understanding_does_not_execute_a_reminder(services):
     assert command.arguments['task'] == 'call mom'
     services.reminder.assert_not_called()
     assert execute_command(command, services).messages == ('Reminder set.',)
-    services.reminder.assert_called_once_with('call mom', '5pm', False, None)
+    services.reminder.assert_called_once_with(services.extract_reminder_info.return_value)
 
 
 def test_pending_reminder_returns_task_without_scheduling(services):
-    services.extract_reminder_info.return_value['time'] = None
+    services.extract_reminder_info.return_value['due'] = None
     result = execute_query('remind me to call mom', services)
     assert result.status == 'pending'
     assert result.pending_action == 'reminder_time'
@@ -156,8 +157,8 @@ def test_voice_wrapper_delivers_once_and_preserves_legacy_values(services):
     assert handle_query('open google', services=services, output=output) is True
     output.assert_called_once_with('Opening Google.')
     services.open_url.assert_called_once()
-    services.extract_reminder_info.return_value['time'] = None
-    assert handle_query('remind me to call mom', services=services, output=output) == 'pending_reminder_time'
+    services.extract_reminder_info.return_value['due'] = None
+    assert handle_query('remind me to call mom',  services=services, output=output) == 'pending_reminder_time'
     services.extract_reminder_info.return_value['task'] = ''
     assert handle_query('remind me', services=services, output=output) is False
 

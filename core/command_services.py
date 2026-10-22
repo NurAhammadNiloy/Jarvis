@@ -8,9 +8,12 @@ from core.command_result import ActionResult
 
 
 class CommandServices:
-    def __init__(self, notifications=None):
+    def __init__(self, notifications=None, now=None):
         self.notifications = notifications or TextNotifications()
         self._timers = None
+        if now is None:
+            from core.reminder_parser import local_now as now
+        self.now = now
 
     @property
     def timers(self):
@@ -20,8 +23,10 @@ class CommandServices:
         return self._timers
 
     def extract_reminder_info(self, query):
-        from utils.nlp_utils import extract_reminder_info
-        return extract_reminder_info(query)
+        """Task, timezone-aware due datetime, recurrence and kind; no NLP model."""
+        from dataclasses import asdict
+        from core.reminder_parser import parse_reminder
+        return asdict(parse_reminder(query, self.now()))
 
     def extract_timer_info(self, query):
         from core.smart_timer import extract_timer_info
@@ -62,12 +67,17 @@ class CommandServices:
         import webbrowser
         return webbrowser.open(url)
 
-    def reminder(self, task, time, recurring, interval):
+    def reminder(self, request):
+        """Schedule a parsed request (see extract_reminder_info)."""
         from core import reminder_manager
         reminder_manager.initialize_reminders(notify=self.notifications.speak)
         messages = []
+        # Transitional: the legacy scheduler takes a string. Replaced by the
+        # SQLite scheduler, which takes the datetime itself.
+        recurring = request['recurrence'] != 'none'
         succeeded = reminder_manager.handle_reminder(
-            task, time, recurring, interval, respond=messages.append,
+            request['task'], request['due'].strftime('%Y-%m-%d %H:%M:%S'), recurring,
+            request['recurrence'] if recurring else None, respond=messages.append,
             notify=self.notifications.speak,
         )
         return ActionResult(tuple(messages), succeeded)
