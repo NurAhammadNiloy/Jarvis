@@ -89,12 +89,17 @@ class Assistant:
             # and snooze run (or refuse) directly.
             if self.dialogue.repairing or decision.kind == 'clarify' or route(text).intent in {'chat', 'create_reminder'}:
                 from dataclasses import replace
+                trigger = ('repair in progress' if self.dialogue.repairing else
+                           'unclear audio' if decision.kind == 'clarify' else 'conversation')
+                started = time.monotonic()
                 turn = self.dialogue.turn(replace(recognition, text=text), reason=(
                     decision.prompt if decision.kind == 'clarify' else 'conversation'))
+                dialogue_ms = round((time.monotonic() - started) * 1000)
                 self.active_conversation = True
                 self.last_active_time = self.clock()
                 self.speech.stop()
-                record('dialogue_turn', reply=turn.reply, confirmed_query=turn.query)
+                record('dialogue_turn', reply=turn.reply, confirmed_query=turn.query,
+                       duration_ms=dialogue_ms, model_called=self.dialogue.model_called, trigger=trigger)
                 if turn.reply:
                     self.output(turn.reply)
                     return True
@@ -102,9 +107,11 @@ class Assistant:
                 # an executable query. The model can only create a proposal.
                 self.pending_reminder = None
                 record('command_started', text=turn.query)
+                started = time.monotonic()
                 result = execute_query(turn.query, self.services)
                 record('command_result', status=result.status, intent=result.intent,
-                       messages=list(result.messages), pending_action=result.pending_action)
+                       messages=list(result.messages), pending_action=result.pending_action,
+                       duration_ms=round((time.monotonic() - started) * 1000))
                 deliver_result(result, self.output)
                 return True
             self.dialogue.observe('user', text)
@@ -130,9 +137,10 @@ class Assistant:
             # The answer completes the original request, which is parsed once.
             query = f"{self.pending_reminder['query']} {query}"
         record('command_started', text=query)
+        started = time.monotonic()
         result = execute_query(query, self.services)
         record('command_result', status=result.status, intent=result.intent, messages=list(result.messages),
-               pending_action=result.pending_action)
+               pending_action=result.pending_action, duration_ms=round((time.monotonic() - started) * 1000))
         if result.pending_action == 'reminder_time':
             self.pending_reminder = {'query': result.data.get('query') or f"remind me to {result.data['task']}"}
         elif result.status != 'error':

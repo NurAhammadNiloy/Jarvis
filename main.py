@@ -2,7 +2,9 @@ from core.assistant import Assistant
 
 def main():
     from core.conversation_log import start_logging, record
+    from core.live_transcript import enable as show_transcripts
     print(f"Conversation log: {start_logging()}")
+    show_transcripts()
     print("  JARVIS AI ASSISTANT")
     print("=" * 50)
     print()

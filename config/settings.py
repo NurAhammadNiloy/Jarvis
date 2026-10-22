@@ -6,3 +6,6 @@ NETWORK_TIMEOUT_SECONDS = 10
 
 # IANA zone for reminders and alarms, e.g. "Europe/Helsinki". None = system zone.
 TIMEZONE = None
+
+# Print one line per heard utterance (what Jarvis heard, how it was handled, timings).
+SHOW_TRANSCRIPTS = True

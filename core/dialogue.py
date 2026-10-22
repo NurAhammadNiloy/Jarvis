@@ -20,6 +20,7 @@ class Dialogue:
         self.pending = None
         self.updated = 0
         self.repairing = False
+        self.model_called = False  # whether the last turn called the model
 
     @staticmethod
     def _resolve(context):
@@ -39,6 +40,7 @@ class Dialogue:
             self.clear()
             self.history.clear()
         self.updated = self.clock()
+        self.model_called = False
         tokens = words(recognition.text)
         reliable = (not recognition.error and not recognition.truncated and
                     recognition.confidence is not None and recognition.confidence >= 0.8 and
@@ -60,6 +62,7 @@ class Dialogue:
         if not self.pending and tokens in {('yes',), ('confirm',)}:
             return DialogueTurn('What would you like me to do?')
         try:
+            self.model_called = True
             result = self.resolve({'history': list(self.history), 'pending_query': self.pending,
                 'reason': reason, 'recognition': {'text': recognition.text,
                     'confidence': recognition.confidence,

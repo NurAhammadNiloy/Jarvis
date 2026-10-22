@@ -38,6 +38,7 @@ class ConversationLog:
 
 
 _log = None
+_listeners = []
 
 
 def start_logging(path=DEFAULT_PATH):
@@ -47,9 +48,24 @@ def start_logging(path=DEFAULT_PATH):
     return _log.path
 
 
+def add_listener(listener):
+    """Call listener(event, fields) for every recorded event (e.g. live transcripts)."""
+    _listeners.append(listener)
+
+
+def remove_listener(listener):
+    if listener in _listeners:
+        _listeners.remove(listener)
+
+
 def record(event, **fields):
     if _log is not None:
         _log.record(event, **fields)
+    for listener in list(_listeners):
+        try:
+            listener(event, fields)
+        except Exception:  # a listener must never affect the assistant
+            pass
 
 
 def record_recognition(result, *, partial=False):
