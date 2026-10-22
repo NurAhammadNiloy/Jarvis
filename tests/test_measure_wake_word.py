@@ -211,3 +211,42 @@ def test_a_try_without_any_speech_is_repeated_once_not_counted(capsys):
     assert tries == [[(False, 0.31), (False, 0.0)], [(True, 0.72), (False, 0.0)]]   # silent twice: a miss
     assert capsys.readouterr().out.count("I didn't hear you") == 2
     assert len(log.audio) == len(QUIET * 200) * 3 + len(SPOKEN * 30)        # every try's audio is checked for levels
+
+
+# --- scenarios and the summary table -------------------------------------------------------------
+
+def run(scenario, plain, tuned, time='2026-10-22T21:30:00', threshold=0.5):
+    names = ['Plain model', 'Tuned to your voice']
+    background = [([(5.0, 0.6)] * plain[1], plain[2]), ([(5.0, 0.6)] * tuned[1], tuned[2])]
+    tries = [[(True, 0.9)] * plain[0] + [(False, 0.1)] * (10 - plain[0]), [(True, 0.9)] * tuned[0] + [(False, 0.1)] * (10 - tuned[0])]
+    record = measure.result_record(scenario, 'notes', threshold, names, background, tries, {'noise_floor_db': -90.3})
+    record['time'] = time
+    return record
+
+
+def test_results_are_saved_locally_and_the_summary_shows_the_latest_run_of_each_scenario(tmp_path):
+    path = tmp_path / 'voice' / 'measurements.jsonl'
+    assert measure.summary_table(measure.load_results(path))[0].startswith('No measurements yet')
+    measure.save_result(path, run('video', (5, 1, 0.86), (9, 0, 0.04), time='2026-10-22T21:14:00'))
+    measure.save_result(path, run('quiet', (6, 0, 0.05), (9, 0, 0.10), time='2026-10-22T20:00:00'))
+    measure.save_result(path, run('video', (5, 0, 0.30), (8, 0, 0.20), time='2026-10-23T09:05:00'))   # replaces the first
+    table = measure.summary_table(measure.load_results(path))
+    assert table[0].split() == ['Scenario', 'Model', 'Detected', 'False', 'wake-ups', 'Highest', 'background', 'Verdict', 'Measured']
+    rows = [line.split() for line in table[2:-1]]
+    assert [(r[0], r[1]) for r in rows] == [('quiet', 'Plain'), ('quiet', 'Tuned'), ('video', 'Plain'), ('video', 'Tuned')]
+    text = '\n'.join(table)
+    assert '6/10' in text and '9/10' in text and '8/10' in text and '5/10' in text
+    assert '2026-10-23 09:05' in text and '21:14' not in text          # the later video run, not the first
+    assert [('GOOD' in line) for line in table[2:-1]] == [False, True, False, False]   # only quiet-tuned: 9/10, 0.10
+    assert 'threshold 0.50' in table[-1]
+
+
+def test_a_run_without_a_scenario_is_labelled(tmp_path):
+    assert run(None, (9, 0, 0.1), (9, 0, 0.1))['scenario'] == 'unlabelled'
+
+
+def test_summary_needs_no_microphone(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr('core.wake_word.MEASUREMENTS_PATH', tmp_path / 'none.jsonl')
+    monkeypatch.setattr('sys.argv', ['measure_wake_word.py', '--summary'])
+    measure.main()
+    assert 'No measurements yet' in capsys.readouterr().out

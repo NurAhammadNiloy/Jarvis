@@ -232,3 +232,53 @@ def test_training_uses_commands_and_saved_background_peaks_as_negatives(tmp_path
     assert sorted(p.parent.name for p in seen['negatives']) == ['background', 'commands', 'commands', 'speech']
     assert [p.parent.name for p in seen['peaks']] == ['background_peaks'] * 2
     assert 'and 2 saved background peaks' in capsys.readouterr().out
+
+
+# --- scenarios -----------------------------------------------------------------------------------
+
+def test_scenario_names_and_clip_labels(tmp_path, monkeypatch):
+    assert wake_word.scenario_name('Household noise!') == 'household-noise'
+    with pytest.raises(ValueError):
+        wake_word.scenario_name('???')
+    monkeypatch.setattr(wake_word, 'VOICE_DIR', tmp_path)
+    assert wake_word.clip_label(tmp_path / 'background' / 'video' / 'background_001.wav') == 'background/video/background_001.wav'
+    assert wake_word.clip_kind('background/video/background_001.wav') == 'background: video'
+    assert wake_word.clip_kind('background/background_001.wav') == 'background (no scenario)'
+    assert wake_word.clip_kind('commands/command_001.wav') == 'your commands'
+
+
+def test_a_scenario_recording_adds_to_earlier_ones_in_its_own_folder(tmp_path):
+    folder = tmp_path / 'background'
+    for _ in range(2):
+        record.record_background(Frames(), folder, seconds=20, wait=lambda *_: '', scenario='video')
+    assert sorted(p.name for p in (folder / 'video').glob('*.wav')) == [f'background_00{i}.wav' for i in range(1, 5)]
+    record.record_background(Frames(), folder, seconds=10, wait=lambda *_: '', scenario='talking')
+    assert len(list((folder / 'talking').glob('*.wav'))) == 1 and not list(folder.glob('*.wav'))
+
+
+def test_scenario_needs_only_background(monkeypatch):
+    monkeypatch.setattr('sys.argv', ['record_voice.py', '--scenario', 'video'])
+    with pytest.raises(SystemExit):
+        record.main()
+
+
+def test_training_clips_cover_every_scenario_and_peak(tmp_path):
+    for clip in ('wake/a', 'speech/a', 'commands/a', 'background/loose', 'background/video/a', 'background/talking/a',
+                 'other_voices/a', 'background_peaks/video/a', 'background_peaks/p'):
+        folder, _, name = clip.rpartition('/')
+        record.write_wav(tmp_path / folder / f'{name}_001.wav', SILENCE)
+    positives, negatives, peaks = wake_word.training_clips(tmp_path)
+    assert len(positives) == 1
+    assert sorted(c.relative_to(tmp_path).as_posix() for c in negatives) == [
+        'background/loose_001.wav', 'background/talking/a_001.wav', 'background/video/a_001.wav',
+        'commands/a_001.wav', 'other_voices/a_001.wav', 'speech/a_001.wav']
+    assert sorted(c.relative_to(tmp_path).as_posix() for c in peaks) == [
+        'background_peaks/p_001.wav', 'background_peaks/video/a_001.wav']
+
+
+def test_training_report_is_per_scenario():
+    negative = {'background/video/background_001.wav': [[(0.3, 0.6)]] * 2, 'background/video/background_002.wav': [[(0.1, 0.1)]] * 2,
+                'background/talking/background_001.wav': [[(0.1, 0.1)]] * 2, 'speech/speech_001.wav': [[(0.1, 0.1)]] * 2}
+    lines = train.describe(report({'a.wav': [[(0.4, 0.9)]] * 10}, negative), gate=0.09)
+    assert '    background: video: 2/4, 0.60' in lines and '    background: talking: 0/2, 0.10' in lines
+    assert '    your speech: 0/2, 0.10' in lines

@@ -179,6 +179,11 @@ The measurement saves a short clip of every background moment scoring above 0.20
 (`data/voice/background_peaks/`, with times in `peaks.jsonl`; the next training learns them
 as "not the wake word") and reports the mic's noise
 floor and clipping; `tools/record_voice.py --check` checks the recordings for both.
+Your situations are recorded and measured one at a time: `record_voice.py --only background
+--scenario video` (also `quiet`, `talking`, `household`, or your own name) adds 90 s of that
+sound as negatives, `measure_wake_word.py --scenario video` measures it, and
+`measure_wake_word.py --summary` prints one table of the latest run of every scenario
+(`data/voice/measurements.jsonl`). Training reports false wake-ups per scenario.
 
 ### Example Commands
 ```

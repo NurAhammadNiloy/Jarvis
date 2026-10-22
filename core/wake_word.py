@@ -19,6 +19,15 @@ ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / 'models' / 'wake_word'
 VOICE_DIR = ROOT / 'data' / 'voice'                  # your recordings: gitignored, never uploaded
 VERIFIER_PATH = VOICE_DIR / 'hey_jarvis_verifier.pkl'
+MEASUREMENTS_PATH = VOICE_DIR / 'measurements.jsonl'   # tools/measure_wake_word.py results
+# Your real situations, recorded (tools/record_voice.py --scenario) and measured
+# (tools/measure_wake_word.py --scenario) one by one. Other names work too.
+SCENARIOS = {
+    'quiet': 'your quiet room as it usually is: sit, type, move a little',
+    'talking': 'someone talking beside you, or the two of you talking',
+    'video': 'a video playing on your phone or laptop at your usual volume',
+    'household': 'household noise: the blender, cooking, chairs moving, doors',
+}
 WAKE_MODEL = 'hey_jarvis_v0.1'
 KEYWORD = 'hey jarvis'
 _FEATURE_FILES = ('melspectrogram.onnx', 'embedding_model.onnx')
@@ -176,6 +185,51 @@ def positive_examples(frames, gate=VERIFIER_GATE, threshold=0.25):
     return [features for score, features in frames if score >= cut]
 
 
+def scenario_name(text):
+    """'Household noise' -> 'household-noise': a scenario label usable as a folder name."""
+    import re
+    name = re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
+    if not name:
+        raise ValueError(f'Not a usable scenario name: {text!r}')
+    return name
+
+
+def clip_label(path):
+    """Where a clip sits under data/voice/: 'background/video/background_001.wav'."""
+    path = Path(path)
+    try:
+        return path.resolve().relative_to(VOICE_DIR.resolve()).as_posix()
+    except ValueError:
+        return f'{path.parent.name}/{path.name}'
+
+
+# The kinds of "not the wake word" sound, as the training report names them.
+_KINDS = {'speech': 'your speech', 'commands': 'your commands', 'background': 'background',
+          'background_peaks': 'saved peaks', 'other_voices': 'other voices saying "Jarvis"'}
+
+
+def clip_kind(label):
+    """'background/video/background_001.wav' -> 'background: video'."""
+    parts = label.split('/')
+    kind = _KINDS.get(parts[0], parts[0])
+    if parts[0] in ('background', 'background_peaks'):
+        return f'{kind}: {parts[1]}' if len(parts) > 2 else f'{kind} (no scenario)'
+    return kind
+
+
+def training_clips(voice_dir=None):
+    """The recordings to train on: ("Hey Jarvis" clips, other speech and sound, saved
+    peaks). Background clips are in a folder per scenario (and loose ones from before);
+    other_voices/ holds optional clips of other people saying "Jarvis"."""
+    voice_dir = Path(voice_dir or VOICE_DIR)
+
+    def wavs(part, deep=False):
+        return sorted((voice_dir / part).rglob('*.wav') if deep else (voice_dir / part).glob('*.wav'))
+    others = [clip for part in ('speech', 'commands') for clip in wavs(part)]
+    return (wavs('wake'), others + wavs('background', deep=True) + wavs('other_voices'),
+            wavs('background_peaks', deep=True))
+
+
 def tuned_peak(scored, gate=VERIFIER_GATE):
     """The highest score of a clip whose frames are (plain score, verifier score): the
     verifier decides from `gate` up, as openWakeWord applies it (score >= gate)."""
@@ -244,7 +298,8 @@ def train_verifier(positive_clips, negative_clips, output_path, *, peak_clips=()
         return [(plain, float(p)) for (plain, _), p in zip(frames, probabilities)]
 
     # Check on held-out clips first: each clip is scored by a verifier that never saw it.
-    report = {'positive': {}, 'negative': {}, 'peaks': [negative_clips[i].name for i in sorted(peaks)],
+    labels = [clip_label(clip) for clip in negative_clips]       # unique, and say which scenario
+    report = {'positive': {}, 'negative': {}, 'peaks': [labels[i] for i in sorted(peaks)],
               'threshold': threshold}
     folds = max(2, min(folds, len(positive_clips), len(negative_clips) if len(negative_clips) > 1 else 2))
     for fold in range(folds):
@@ -255,7 +310,7 @@ def train_verifier(positive_clips, negative_clips, output_path, *, peak_clips=()
         for i in test_pos:
             report['positive'][positive_clips[i].name] = [scored(verifier, frames) for frames in positives[i]]
         for i in test_neg:
-            report['negative'][negative_clips[i].name] = [scored(verifier, frames) for frames in negatives[i]]
+            report['negative'][labels[i]] = [scored(verifier, frames) for frames in negatives[i]]
         progress(f'  checked fold {fold + 1} of {folds}')
 
     verifier = fit(range(len(positive_clips)), range(len(negative_clips)))

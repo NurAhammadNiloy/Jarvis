@@ -4,9 +4,11 @@
 
 Trains openWakeWord's personal verifier: "Hey Jarvis" clips (data/voice/wake/) against
 your other speech and background sound (data/voice/speech/, data/voice/background/,
-data/voice/commands/), and every background moment the measurement saved because it
-scored high (data/voice/background_peaks/: false wake-ups and near-misses, including other
-voices saying "Jarvis"). Delete a peak clip if it is really you saying "Hey Jarvis".
+data/voice/commands/), the background of every scenario you recorded
+(data/voice/background/<scenario>/, tools/record_voice.py --scenario), optional clips of other
+people saying "Jarvis" (data/voice/other_voices/), and every background moment the measurement
+saved because it scored high (data/voice/background_peaks/). The result is reported per
+scenario. Delete a peak clip if it is really you saying "Hey Jarvis".
 First every clip is scored by a verifier that was trained without it, so the numbers
 show how it does on new attempts; then the final verifier is trained on everything and
 saved as data/voice/hey_jarvis_verifier.pkl. Jarvis uses it from the next start
@@ -29,7 +31,7 @@ def share(count, total):
 
 def describe(report, gate, threshold=None):
     """Readable lines from train_verifier's report, at verifier gate `gate`."""
-    from core.wake_word import evaluate
+    from core.wake_word import clip_kind, evaluate, tuned_peak
     threshold = report['threshold'] if threshold is None else threshold
     result = evaluate(report, gate, threshold)
     alignments = max((len(tries) for tries in report['positive'].values()), default=0)
@@ -44,6 +46,16 @@ def describe(report, gate, threshold=None):
         accepted = [name for name in report['peaks'] if result['false_wakes'].get(name)]
         lines.append(f'  saved background peaks ({len(report["peaks"])}): '
                      + ('all rejected' if not accepted else 'still accepted: ' + ', '.join(accepted)))
+    kinds = {}
+    for label, wakes in result['false_wakes'].items():
+        kind = clip_kind(label)
+        tries = len(report['negative'][label])
+        previous = kinds.get(kind, (0, 0, 0.0))
+        kinds[kind] = (previous[0] + wakes, previous[1] + tries,
+                       max(previous[2], max(tuned_peak(s, gate) for s in report['negative'][label])))
+    if len(kinds) > 1:
+        lines.append('  per situation (tuned false wake-ups / checks, highest score):')
+        lines.extend(f'    {kind}: {wakes}/{tries}, {highest:.2f}' for kind, (wakes, tries, highest) in sorted(kinds.items()))
     missed = [(name, count) for name, count in result['missed'].items() if count]
     if missed:
         lines.append('  still missed: ' + ', '.join(f'{name} ({count} of {alignments})' for name, count in missed))
@@ -66,13 +78,11 @@ def describe(report, gate, threshold=None):
 
 def main():
     from config.settings import WAKE_WORD_THRESHOLD, WAKE_WORD_VERIFIER_GATE
-    from core.wake_word import VERIFIER_PATH, VOICE_DIR, train_verifier
+    from core.wake_word import VERIFIER_PATH, VOICE_DIR, train_verifier, training_clips
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--threshold', type=float, default=WAKE_WORD_THRESHOLD)
     args = parser.parse_args()
-    positives = sorted((VOICE_DIR / 'wake').glob('*.wav'))
-    negatives = [clip for part in ('speech', 'background', 'commands') for clip in sorted((VOICE_DIR / part).glob('*.wav'))]
-    peaks = sorted((VOICE_DIR / 'background_peaks').glob('*.wav'))
+    positives, negatives, peaks = training_clips(VOICE_DIR)
     if len(positives) < 5 or not negatives:
         print(f'Found {len(positives)} "Hey Jarvis" clips and {len(negatives)} other clips in {VOICE_DIR}.')
         print('Record them first: env\\Scripts\\python.exe -B tools\\record_voice.py')

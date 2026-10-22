@@ -2,6 +2,7 @@
 
     env\\Scripts\\python.exe -B tools\\record_voice.py              (everything, about 9 minutes)
     env\\Scripts\\python.exe -B tools\\record_voice.py --only wake  (one part again: wake, speech, background, commands)
+    env\\Scripts\\python.exe -B tools\\record_voice.py --only background --scenario video   (1-2 minutes)
     env\\Scripts\\python.exe -B tools\\record_voice.py --check      (microphone noise and clipping in the recordings)
 
 Parts:
@@ -9,6 +10,10 @@ Parts:
   speech      2 minutes of your normal speech WITHOUT the wake word (read aloud, then talk) ~2 min
   background  1 minute of whatever usually plays around you (optional, press s to skip)   ~1 min
   commands    20 short commands read from a list, saved with the exact text              ~3 min
+
+Scenarios (--only background --scenario NAME): one situation at a time, 90 seconds by default
+(--seconds to change): quiet, talking, video, household, or a name of your own. They are
+saved in data/voice/background/NAME/ and add to earlier recordings, no --fresh needed.
 
 Everything is stored in data/voice/ (gitignored). Nothing is uploaded or sent anywhere.
 Re-running a part adds to it; --fresh deletes that part's old recordings first.
@@ -147,11 +152,11 @@ def check(voice_dir):
     from core.wake_word import NOISY_FLOOR_DB, audio_levels, read_wav
     lines = []
     for part in ('wake', 'speech', 'background', 'commands'):
-        clips = sorted((Path(voice_dir) / part).glob('*.wav'))
+        clips = sorted((Path(voice_dir) / part).rglob('*.wav'))
         if not clips:
             lines.append(f'{part}: no recordings')
             continue
-        levels = {clip.name: audio_levels(read_wav(clip)) for clip in clips}
+        levels = {clip.relative_to(Path(voice_dir) / part).as_posix(): audio_levels(read_wav(clip)) for clip in clips}
         clipped = [name for name, level in levels.items() if level['clipped']]
         floor = statistics.median(level['noise_floor_db'] for level in levels.values())
         lines.append(f'{part}: {len(clips)} clips, noise floor {floor:.0f} dBFS, loudest '
@@ -201,12 +206,21 @@ def record_speech(frames, folder, seconds=120, chunk=10, wait=input):
     print('\n  done.')
 
 
-def record_background(frames, folder, seconds=60, wait=input):
-    print(f'\nPart 3: {seconds} seconds of what usually plays around you (a video, music, TV, people talking).')
-    print("Start it now and stay quiet. This teaches the tuning what is NOT you saying the wake word.")
-    if wait('Press Enter to record, or type s and Enter to skip. ').strip().lower() == 's':
-        print('  skipped.')
-        return
+def record_background(frames, folder, seconds=60, wait=input, scenario=None):
+    """Background sound as negatives. With a scenario, one situation (folder/<scenario>/),
+    added to what is there; without, the optional part 3 of a full recording."""
+    from core.wake_word import SCENARIOS
+    if scenario:
+        folder = folder / scenario
+        print(f'\nScenario "{scenario}": {seconds} seconds of {SCENARIOS.get(scenario, scenario)}.')
+        print("Stay quiet yourself (don't say \"Hey Jarvis\"). This teaches the tuning what is NOT you.")
+        wait('Set it up, then press Enter to record. ')
+    else:
+        print(f'\nPart 3: {seconds} seconds of what usually plays around you (a video, music, TV, people talking).')
+        print("Start it now and stay quiet. This teaches the tuning what is NOT you saying the wake word.")
+        if wait('Press Enter to record, or type s and Enter to skip. ').strip().lower() == 's':
+            print('  skipped.')
+            return
     for start in range(0, seconds, 10):
         write_wav(next_path(folder, 'background'), read_seconds(frames, 10))
         print(f'  {start + 10} of {seconds} s', end='\r', flush=True)
@@ -237,6 +251,9 @@ def main():
     from core.wake_word import VOICE_DIR
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--only', choices=['wake', 'speech', 'background', 'commands'])
+    parser.add_argument('--scenario', help='with --only background: the situation (quiet, talking, video, household, '
+                        'or your own name); adds to earlier recordings of it')
+    parser.add_argument('--seconds', type=int, default=None, help='length of a background recording (default 60; 90 for a scenario)')
     parser.add_argument('--fresh', action='store_true', help="delete the chosen parts' old recordings first")
     parser.add_argument('--check', action='store_true', help='check the recordings for mic noise and clipping (no recording)')
     parser.add_argument('--device', default=None, help='input device name or index (default: the system microphone)')
@@ -245,8 +262,16 @@ def main():
         for line in check(VOICE_DIR):
             print(line)
         return
+    if args.scenario and args.only != 'background':
+        parser.error('--scenario goes with --only background')
+    scenario = None
+    if args.scenario:
+        from core.wake_word import scenario_name
+        scenario = scenario_name(args.scenario)
     parts = [args.only] if args.only else ['wake', 'speech', 'background', 'commands']
     folders = {part: VOICE_DIR / part for part in parts}
+    if scenario:
+        folders['background'] = VOICE_DIR / 'background' / scenario
     if args.fresh:
         for folder in folders.values():
             if folder.exists():
@@ -266,7 +291,8 @@ def main():
         if 'speech' in parts:
             record_speech(frames, folders['speech'])
         if 'background' in parts:
-            record_background(frames, folders['background'])
+            record_background(frames, VOICE_DIR / 'background' if scenario else folders['background'],
+                              seconds=args.seconds or (90 if scenario else 60), scenario=scenario)
         if 'commands' in parts:
             record_commands(frames, vad, folders['commands'])
     print('')
