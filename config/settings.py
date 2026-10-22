@@ -25,6 +25,15 @@ WAKE_WORD_ENGINE = "openwakeword"
 # 0.5 is openWakeWord's recommended default; measure with tools/measure_wake_word.py.
 WAKE_WORD_THRESHOLD = 0.5
 
+# Personal tuning to your voice: record with tools/record_voice.py, then train with
+# tools/train_wake_verifier.py (stored in data/voice/, never uploaded). Used once trained;
+# False = the plain model only.
+WAKE_WORD_PERSONAL = True
+
+# The personal tuning decides from this plain-model score up (lower = it judges more of
+# what you say; your weakest real "Hey Jarvis" peaked at 0.08).
+WAKE_WORD_VERIFIER_GATE = 0.05
+
 # After the wake word or a finished exchange (once Jarvis stops speaking), Jarvis
 # listens without the wake word for this long, then returns to passive mode.
 ACTIVE_WINDOW_SECONDS = 30

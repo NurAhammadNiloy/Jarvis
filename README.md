@@ -172,7 +172,9 @@ python main.py
 4. Jarvis processes and responds with synthesized speech
 5. The conversation stays active for 30 seconds after each reply, then Jarvis returns to passive mode
 
-Measure the wake word in your room with `tools/measure_wake_word.py`.
+Measure the wake word in your room with `tools/measure_wake_word.py`, and tune it to your
+voice: record with `tools/record_voice.py` (about 9 minutes), then train with
+`tools/train_wake_verifier.py` (about a minute). Recordings stay in `data/voice/`.
 
 ### Example Commands
 ```

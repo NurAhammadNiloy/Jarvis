@@ -1,0 +1,159 @@
+"""Recording your voice and tuning the wake word to it (no microphone needed)."""
+import importlib.util
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from core import wake_word
+from core.wake_word import OpenWakeWordDetector, create_detector, read_wav, train_verifier
+
+TOOLS = Path(__file__).parents[1] / 'tools'
+DATA = Path(__file__).parent / 'data'
+MODEL_READY = (Path(__file__).parents[1] / 'models' / 'wake_word' / 'hey_jarvis_v0.1.onnx').exists()
+
+
+def tool(name):
+    spec = importlib.util.spec_from_file_location(name, TOOLS / f'{name}.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+record = tool('record_voice')
+train = tool('train_wake_verifier')
+SPEECH, SILENCE = b'\x01\x00' * 320, b'\x00' * 640
+
+
+class Frames:
+    """20 ms frames from a script of (count, voiced) runs, then silence."""
+    def __init__(self, *runs):
+        self.frames = [SPEECH if voiced else SILENCE for count, voiced in runs for _ in range(count)]
+
+    def read(self, timeout):
+        return self.frames.pop(0) if self.frames else SILENCE
+
+
+def vad(frame):
+    return frame == SPEECH
+
+
+# --- recording ------------------------------------------------------------------------------
+
+def test_read_seconds_and_voiced_time():
+    audio = record.read_seconds(Frames((10, True), (40, False)), 1)
+    assert len(audio) == 32000 and record.voiced_ms(audio, vad) == 200
+
+
+def test_an_utterance_runs_from_speech_to_the_pause_and_silence_gives_none():
+    audio = record.read_utterance(Frames((20, False), (50, True), (100, False)), vad, silence_ms=1200)
+    assert record.voiced_ms(audio, vad) == 1000
+    assert len(audio) == (14 + 50 + 60) * 640          # 0.28 s before, the speech, the closing pause
+    assert record.read_utterance(Frames(), vad, wait_seconds=1) is None
+
+
+def test_wake_clips_are_saved_and_silent_tries_repeated(tmp_path):
+    # A silent first try (3 s), then two tries of 3 s, each followed by the 0.7 s pause.
+    frames = Frames((150, False), (40, True), (110, False), (35, False), (40, True), (110, False), (35, False))
+    record.record_wake(frames, vad, tmp_path, prompts=['normally', 'quickly'], wait=lambda *_: '')
+    clips = sorted(tmp_path.glob('*.wav'))
+    assert [c.name for c in clips] == ['hey_jarvis_001.wav', 'hey_jarvis_002.wav']
+    assert len(read_wav(clips[0])) == 3 * 16000
+
+
+def test_commands_are_saved_with_the_exact_text(tmp_path):
+    frames = Frames((10, False), (40, True), (80, False), (10, False), (30, True), (80, False))
+    record.record_commands(frames, vad, tmp_path, commands=('what time is it', 'yes do it'), wait=lambda *_: '')
+    manifest = [json.loads(line) for line in (tmp_path / 'manifest.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert [(m['file'], m['text']) for m in manifest] == [('command_001.wav', 'what time is it'),
+                                                          ('command_002.wav', 'yes do it')]
+
+
+def test_speech_is_saved_in_ten_second_pieces_and_background_can_be_skipped(tmp_path):
+    record.record_speech(Frames(), tmp_path / 'speech', seconds=20, wait=lambda *_: '')
+    assert len(list((tmp_path / 'speech').glob('speech_*.wav'))) == 2
+    record.record_background(Frames(), tmp_path / 'background', wait=lambda *_: 's')
+    assert not (tmp_path / 'background').exists()
+
+
+def test_numbering_continues_and_fresh_clears(tmp_path):
+    record.write_wav(tmp_path / 'hey_jarvis_007.wav', SILENCE)
+    assert record.next_path(tmp_path, 'hey_jarvis').name == 'hey_jarvis_008.wav'
+    record.clear(tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_command_list_has_twenty_commands_and_the_wake_list_thirty_varied_prompts():
+    assert len(record.COMMANDS) == 20 and len(set(record.COMMANDS)) == 20
+    assert len(record.WAKE_PROMPTS) == 30 and len(set(record.WAKE_PROMPTS)) == 5
+    assert 'hey jarvis' not in record.SPEECH_TEXT.lower().replace('"hey jarvis"', '')
+
+
+def test_recordings_go_to_data_voice():
+    assert wake_word.VOICE_DIR == Path(__file__).parents[1] / 'data' / 'voice'
+    assert wake_word.VERIFIER_PATH.parent == wake_word.VOICE_DIR
+
+
+# --- training ------------------------------------------------------------------------------
+
+def clips(tmp_path):
+    """Five "Hey Jarvis" clips (one recording at different starts and volumes) and two others."""
+    hey, other = read_wav(DATA / 'hey_jarvis_what_time.wav'), read_wav(DATA / 'what_time.wav')
+    positives = []
+    for i, (start, gain) in enumerate([(0, 1.0), (800, 0.7), (1600, 1.2), (2400, 0.5), (3200, 0.9)]):
+        path = tmp_path / 'wake' / f'hey_jarvis_{i:03d}.wav'
+        record.write_wav(path, (hey[start:] * gain).astype(np.int16).tobytes())
+        positives.append(path)
+    negatives = [record.write_wav(tmp_path / 'speech' / f'speech_{i:03d}.wav', (other * g).astype(np.int16).tobytes())
+                 for i, g in enumerate((1.0, 0.6))]
+    return positives, negatives
+
+
+@pytest.mark.skipif(not MODEL_READY, reason='wake-word model not downloaded')
+def test_training_checks_on_unseen_clips_saves_the_verifier_and_the_app_uses_it(tmp_path):
+    positives, negatives = clips(tmp_path)
+    report = train_verifier(positives, negatives, tmp_path / 'verifier.pkl', progress=lambda *_: None)
+    assert len(report['positive']) == 5 and len(report['negative']) == 2
+    assert all(tuned >= 0.5 for _, _, tuned in report['positive'])
+    assert all(tuned < 0.5 for _, _, tuned in report['negative'])
+
+    detector = create_detector('openwakeword', 0.5, verifier_path=tmp_path / 'verifier.pkl')
+    assert detector.personal
+    audio = b'\x00' * 32000 + read_wav(DATA / 'hey_jarvis_what_time.wav').tobytes() + b'\x00' * 32000
+    assert [e for e in (detector.process(audio[i:i + 640]) for i in range(0, len(audio) - 639, 640)) if e]
+    assert not create_detector('openwakeword', 0.5, personal=False, verifier_path=tmp_path / 'verifier.pkl').personal
+    assert not create_detector('openwakeword', 0.5, verifier_path=tmp_path / 'missing.pkl').personal
+
+
+def test_training_needs_enough_recordings(tmp_path):
+    with pytest.raises(ValueError, match='at least 5'):
+        train_verifier([tmp_path / 'a.wav'], [tmp_path / 'b.wav'], tmp_path / 'v.pkl')
+
+
+def test_positive_examples_are_the_moments_near_the_clip_peak():
+    frames = [(0.01, 'silence'), (0.2, 'hey'), (0.45, 'jarvis'), (0.3, 'tail'), (0.02, 'after')]
+    assert wake_word.positive_examples(frames) == ['jarvis', 'tail']
+    assert wake_word.positive_examples([(0.03, 'x')]) == []          # never reached the gate
+
+
+def test_verified_score_uses_the_verifier_only_from_the_gate():
+    class Verifier:
+        def predict_proba(self, features):
+            return [[0.1, 0.9]]
+    assert wake_word.verified_score(Verifier(), [(0.04, None), (0.3, None)]) == 0.9
+    assert wake_word.verified_score(Verifier(), [(0.04, None)]) == 0.04
+
+
+def test_training_report_verdict():
+    good = {'positive': [('a', 0.4, 0.9)] * 10, 'negative': [('n', 0.3, 0.1)]}
+    assert train.describe(good, 0.5)[-1].startswith('Verdict: GOOD')
+    noisy = {'positive': [('a', 0.4, 0.9)] * 10, 'negative': [('n', 0.3, 0.7)]}
+    assert 'record more of it' in train.describe(noisy, 0.5)[-1]
+
+
+def test_training_tool_explains_when_nothing_is_recorded(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(wake_word, 'VOICE_DIR', tmp_path)
+    monkeypatch.setattr('sys.argv', ['train_wake_verifier.py'])
+    assert train.main() == 1
+    assert 'record_voice.py' in capsys.readouterr().out
