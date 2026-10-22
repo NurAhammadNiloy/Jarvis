@@ -496,3 +496,15 @@ def test_transcript_says_to_repeat():
         conversation_log.remove_listener(printer)
     assert len(lines) == 1 and lines[0].startswith(
         'You (said over Jarvis — please repeat): "no anything related to Earth you can send me"  conf 0.89')
+
+
+def test_prompt_treats_send_give_show_as_tell_and_admits_missing_live_information():
+    from core import chatgpt_service
+    reply = {'choices': [{'message': {'content': json.dumps({'reply': 'Fine.', 'query': None})}}]}
+    with patch.object(chatgpt_service.openai.ChatCompletion, 'create', return_value=reply) as create:
+        chatgpt_service.resolve_dialogue({'history': [
+            {'role': 'user', 'text': 'anything related to Earth send me'}]})
+    prompt = create.call_args.kwargs['messages'][0]['content']
+    assert '"send me", "give me" and "show me" mean "tell me"' in prompt
+    assert 'live information Jarvis cannot get (news, current events, web search)' in prompt
+    assert 'in one short sentence and offer what you can tell from general knowledge' in prompt
