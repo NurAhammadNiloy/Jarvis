@@ -132,3 +132,61 @@ was what happened *after* recognition: discarded answers, a too-strict "yes"
 and a sticky repair state. The recognition failures (unrecognized audio, 0.06–0.20 transcripts)
 trace back to long utterances mixed with speaker echo, i.e. the audio front
 end, more than to the speech model.
+
+## Fixes
+
+Each fix has regression tests in `tests/test_voice_session_regressions.py`
+built from the exact transcripts, confidences and alternatives above.
+
+| Fix | Files |
+|---|---|
+| **Answers after Jarvis stops are kept.** The endpointer measures how much speech came after Jarvis's last audible frame. An utterance that overlapped playback is kept when you kept speaking for ≥ 300 ms after Jarvis stopped and the transcript isn't Jarvis's own words. Speech entirely over Jarvis (turn 28) and empty transcripts are still discarded. | `voice_capture.py`, `voice_runtime.py` |
+| **Natural confirmations.** "yes do it", "yes please", "go ahead", "sure", "that's right" (and no/cancel variants) are answers. "thank you", "please" and "is that right" are not. | `dialogue.py` |
+| **Short-answer threshold.** An answer needs confidence ≥ 0.5 with every alternative meaning the same thing ("yes" 0.56 with "yesss", "yess" now counts), or ≥ 0.8 ignoring alternatives below 0.5. "yes" with a "no" alternative, or below 0.5, still doesn't confirm. | `dialogue.py` |
+| **Spelling variants aren't conflicts.** "Jarvis"/"Yarvis" and stretched letters ("yesss", "momm") are ignored when comparing alternatives. Name variants ("Mom"/"Mam") are a *wording* conflict: Jarvis confirms your own words ("I have: delete my call Mom reminder. Shall I do that?") without calling ChatGPT. Meaning conflicts (cancel vs don't cancel, 5 vs 9) still ask you to repeat. | `voice_policy.py`, `assistant.py`, `dialogue.py` |
+| **No sticky repair.** A clear, accepted command takes the fast path even while a repair is in progress, and replaces the unfinished request. | `assistant.py` |
+| **"Yes" after a model question.** If ChatGPT's last reply was a question, "yes" goes back to it; otherwise a stray "yes" still gets "What would you like me to do?". The prompt now tells the model to propose actions as commands in your words instead of asking in free text. | `dialogue.py`, `chatgpt_service.py` |
+| **Quoted reminder names** (`delete reminder 'call Mom'`) are read as the target. | `intent_classifier.py` (field extraction; rule order unchanged) |
+| **"wake up at 6:30" is an alarm.** A pattern was added to the existing alarm rule (anchored, so "I wake up at 6:30" stays chat); the parser reads it as morning. | `intent_classifier.py`, `reminder_parser.py` |
+| **Latency: replies are held at most 3 s** for a "busy" microphone (previously unlimited: 6.0 s and 17.9 s in this session). | `speech_output.py` |
+| **Latency/cost: barge-in recognition only while Jarvis is audible**, not while a reply is being synthesised or held. | `voice_runtime.py` |
+
+The live transcript now also shows why a turn went to the dialogue: low
+confidence, similar alternatives, or a repair in progress.
+
+## Recommendations (not implemented)
+
+1. **Stop Jarvis hearing itself.** This is the main source of long utterances,
+   unrecognized audio, low confidence and the overlap problem.
+   - Simplest: a headset, so the microphone doesn't pick up the speakers.
+   - Alternatively, enable acoustic echo cancellation on the input (the
+     Windows "communications" processing, or a WebRTC/Speex echo canceller on
+     the PCM stream).
+   - Or go half-duplex: ignore the microphone during playback except for
+     "Jarvis"/"stop".
+2. **Recognition settings before switching provider.**
+   - Today's recognizer is the free web API behind `speech_recognition`. It has
+     no phrase hints and no model choice.
+   - `google-cloud-speech` is already installed. Its `speech_contexts` can
+     boost "Jarvis", yes/no/cancel, intent words (remind, delete, snooze,
+     alarm, timer) and names from your reminders. `latest_short` suits
+     commands.
+   - A local option is faster-whisper with an initial prompt carrying the same
+     words. That also removes network latency, but costs CPU.
+3. **Streaming recognition** (Cloud Speech streaming) would deliver the
+   transcript as you finish speaking and could end the utterance on the
+   provider's end-of-speech signal. That saves most of the ~0.8 s recognition
+   step and some of the 1.4 s endpoint silence.
+4. **Move provider calls off the conversation loop** (a worker with request
+   ids), so a slow ChatGPT or weather call can be superseded by "stop" or a new
+   request.
+5. **Shorter endpoint for expected short answers.** After "Shall I do that?",
+   0.8 s of silence is enough for "yes"; keep 1.4 s for open requests. Measure
+   with a headset first.
+6. **Voice detector tuning after echo is fixed.** `vad_mode` is 1 (permissive).
+   Try 2 with an energy floor, and measure utterance lengths again; this
+   session's median was 3.8 s, with 11 of 31 over 5 s.
+7. **An on-device wake word** (openWakeWord or Porcupine) would stop sending
+   background audio to Google and avoid false starts like "Deli".
+8. **Cache fixed phrases** ("At your service, sir.", "I couldn't hear that
+   clearly…") to save the ~0.3–0.6 s synthesis call.

@@ -106,7 +106,10 @@ class ContinuousListener:
                         record('utterance_ended', duration_ms=len(utterance.pcm) * 1000 // (c.sample_rate * 2),
                                truncated=utterance.truncated, playback_id=utterance.playback_id)
                         put_latest(self.utterances, (utterance, self.clock()))
-                    if (snapshot.id is not None and sum(recent_voice) * c.frame_ms >= c.minimum_speech_ms and len(recent) >= 15 and
+                    # Barge-in recognition only while Jarvis is actually audible;
+                    # silent synthesis or a held reply cannot be interrupted.
+                    if (snapshot.id is not None and snapshot.audible and
+                            sum(recent_voice) * c.frame_ms >= c.minimum_speech_ms and len(recent) >= 15 and
                             self.clock() - last_partial >= c.barge_interval_ms / 1000):
                         last_partial = self.clock()
                         partial = AudioUtterance(b''.join(recent), playback_id=snapshot.id, playback_text=snapshot.text)
@@ -142,6 +145,12 @@ class ContinuousListener:
                 return None
             addressed = strip_wake_word(result.text) is not None
             if not addressed and not is_stop(result.text):
+                if result.text and utterance.voiced_after_playback_ms >= self.config.after_playback_speech_ms:
+                    # Jarvis's echo opened the utterance, but you kept speaking
+                    # after it stopped (e.g. answering "Shall I do that?").
+                    record('voice_filter_passed', reason='spoke_after_playback', text=result.text,
+                           voiced_after_playback_ms=utterance.voiced_after_playback_ms)
+                    return replace(result, playback_id=None, playback_text='')
                 record('voice_filter', reason='unaddressed_during_playback', text=result.text)
                 # Mixed loudspeaker audio must not turn into an executable action.
                 return None

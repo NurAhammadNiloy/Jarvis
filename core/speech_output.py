@@ -120,10 +120,13 @@ class SoundDevicePlayer:
 
 
 class SpeechController:
-    def __init__(self, synthesizer, player, max_pending=16):
+    def __init__(self, synthesizer, player, max_pending=16, max_input_wait=3.0):
         self.synthesizer = synthesizer
         self.player = player
         self.max_pending = max_pending
+        # Echo or background noise can keep the voice detector "active" for a
+        # long time; the reply then plays anyway.
+        self.max_input_wait = max_input_wait
         self._condition = threading.Condition()
         self._pending = deque()
         self._active = None
@@ -231,10 +234,12 @@ class SpeechController:
                         if not playback_started and self._input_active:
                             waiting = time.monotonic()
                             record('playback_waiting_for_input', playback_id=job.id)
-                            while self._input_active and not job.cancelled.is_set() and not self._closed:
+                            while (self._input_active and not job.cancelled.is_set() and not self._closed
+                                   and time.monotonic() - waiting < self.max_input_wait):
                                 self._condition.wait(timeout=0.05)
                             record('playback_input_wait_finished', playback_id=job.id,
-                                   duration_ms=round((time.monotonic() - waiting) * 1000))
+                                   duration_ms=round((time.monotonic() - waiting) * 1000),
+                                   capped=self._input_active)
                         if job.cancelled.is_set() or self._closed:
                             break
                         self._audible = True

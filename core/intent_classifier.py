@@ -27,7 +27,7 @@ RULES = (
     ('create_reminder',   r"\bremind\s+(?:me|us)\b"
                           + r"|" + _LEAD + r"(?:set|create|add|make)\s+(?:(?:a|an|another|new)\s+)*reminder\b"),
     # Alarm before timers: "set an alarm for 30 minutes" is not a timer.
-    ('alarm',             r"\balarms?\b|\bwake\s+me\b"),
+    ('alarm',             r"\balarms?\b|\bwake\s+me\b|" + _LEAD + r"wake\s+up\b"),
     # Timers: cancel-all before cancel, resume before pause (unpause), and
     # every operation before the generic start rule.
     ('cancel_all_timers', r"\b(?:cancel|stop|delete|remove|clear|end)\b.*\ball\b.*" + _TIMER),
@@ -144,6 +144,7 @@ def extract_topic(query):
     return ' '.join(re.sub(r"[?!.,;:\"]", ' ', topic).split())
 
 
+_TARGET_QUOTED = re.compile(r"(?:^|\s)['\"“‘]([^'\"“”‘’]+)['\"”’](?=\W*$|\s)")
 _TARGET_AFTER = re.compile(_REMINDER + r"\s+(?:about|for|to|called|named)\s+(.+)", re.IGNORECASE)
 _TARGET_BEFORE = re.compile(r"\b(?:delete|remove|cancel|clear|drop|forget(?:\s+about)?|snooze)\s+(.*?)\s*" + _REMINDER,
                             re.IGNORECASE)
@@ -155,7 +156,7 @@ def extract_reminder_target(query):
 
     A duration ("snooze the reminder for 10 minutes") is never the target.
     """
-    for pattern in (_TARGET_AFTER, _TARGET_BEFORE):
+    for pattern in (_TARGET_QUOTED, _TARGET_AFTER, _TARGET_BEFORE):
         match = pattern.search(query)
         if not match:
             continue

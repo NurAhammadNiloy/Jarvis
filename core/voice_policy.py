@@ -55,17 +55,39 @@ def is_echo(text, playback_text):
                 for i in range(len(spoken) - len(heard) + 1)))
 
 
-def alternatives_conflict(result, important=False):
-    primary = words(result.text)
+_WAKE_VARIANTS = {'jarvis', 'yarvis', 'jervis', 'javis'}
+
+
+def _comparable(text):
+    """Words for comparing hypotheses: stretched letters ('yesss', 'momm') and a
+    misheard leading wake word ('Yarvis') do not change what was asked."""
+    tokens = [re.sub(r"([a-z])\1+", r"\1", w) for w in words(text)]
+    if tokens and tokens[0] in _WAKE_VARIANTS:
+        tokens = tokens[1:]
+    return tuple(tokens)
+
+
+def conflict_reason(result, important=False):
+    """'meaning' if alternatives differ in a protected word or number, 'wording'
+    if an important request's alternatives differ only in other words
+    (e.g. 'call Mom' / 'call Mam'), else None."""
+    primary = _comparable(result.text)
     signature = tuple(w for w in primary if w in PROTECTED or any(c.isdigit() for c in w))
+    reason = None
     for alternative in result.alternatives:
         if alternative.confidence is not None and alternative.confidence < 0.5:
             continue
-        other = words(alternative.text)
+        other = _comparable(alternative.text)
         other_signature = tuple(w for w in other if w in PROTECTED or any(c.isdigit() for c in w))
-        if other_signature != signature or (important and other != primary):
-            return True
-    return False
+        if other_signature != signature:
+            return 'meaning'
+        if important and other != primary:
+            reason = 'wording'
+    return reason
+
+
+def alternatives_conflict(result, important=False):
+    return conflict_reason(result, important) is not None
 
 
 def can_interrupt(result):
@@ -93,6 +115,7 @@ class VoiceDecision:
     kind: str  # accept, clarify, stop, ignore
     text: str = ""
     prompt: str = ""
+    reason: str = ""  # for clarify: 'meaning' / 'wording' conflict, 'low_confidence', ...
 
 
 class ConfidenceGate:
@@ -116,12 +139,15 @@ class ConfidenceGate:
         intent = classify_intent(text)
         tokens = words(text)
         important = force_important or intent in ACTION_INTENTS or bool(set(tokens) & PROTECTED)
-        if alternatives_conflict(result, important):
+        conflict = conflict_reason(result, important)
+        if conflict:
             self._repeat = None
-            return VoiceDecision('clarify', prompt="I heard different possibilities. Please repeat the full request.")
+            return VoiceDecision('clarify', text=text, reason=conflict,
+                                 prompt="I heard different possibilities. Please repeat the full request.")
         if result.confidence is not None and result.confidence < (0.8 if important else 0.65):
             self._repeat = None
-            return VoiceDecision('clarify', prompt="I'm not sure I heard that correctly. Please repeat it.")
+            return VoiceDecision('clarify', reason='low_confidence',
+                                 prompt="I'm not sure I heard that correctly. Please repeat it.")
         # Do not let the legacy keyword router turn a negated action into an action.
         if intent in ACTION_INTENTS and set(tokens) & NEGATION:
             self._repeat = None

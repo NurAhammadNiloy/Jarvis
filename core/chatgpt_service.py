@@ -29,7 +29,10 @@ def resolve_dialogue(context):
             'action, query is a standalone plain-text command for confirmation. Supported actions '
             'are reminders (create, delete, snooze), alarms, timers, weather, date/time, YouTube and opening Google.  '
             'Do not propose unsupported actions. For a reminder preserve task, time and recurrence. '
-            'If the user changes topic, answer that topic; do not force the pending request.'
+            'If the user changes topic, answer that topic; do not force the pending request. '
+            'Never ask in reply whether to perform an action; put the action in query and the system '
+            'asks for confirmation. Phrase query as the user would say it, using their words, e.g. '
+            '"delete my call mom reminder" or "set an alarm for 6:30 am".'
         )}, {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)}])
     return json.loads(response['choices'][0]['message']['content'])
 

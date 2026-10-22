@@ -17,6 +17,8 @@ class VoiceConfig:
     language: str = 'en-US'
     barge_window_ms: int = 1800
     barge_interval_ms: int = 800
+    # Speech after Jarvis stopped that marks an overlapping utterance as yours.
+    after_playback_speech_ms: int = 300
 
     def __post_init__(self):
         if self.sample_rate not in (8000, 16000, 32000, 48000) or self.frame_ms not in (10, 20, 30):
@@ -35,6 +37,7 @@ class AudioUtterance:
     truncated: bool = False
     playback_id: object = None
     playback_text: str = ''
+    voiced_after_playback_ms: int = 0  # speech after the last audible playback frame
 
 
 class Endpointer:
@@ -57,6 +60,7 @@ class Endpointer:
         self.draining = False
         self.playback_id = None
         self.playback_text = ''
+        self.after_playback = 0
 
     @property
     def active(self):
@@ -78,20 +82,27 @@ class Endpointer:
                 return None
             self.frames = [item[0] for item in self.pre]
             self.voiced = sum(item[1] for item in self.pre) * c.frame_ms
-            for _, _, job_id, text in self.pre:
+            for _, was_voiced, job_id, text in self.pre:
                 if job_id is not None:
                     self.playback_id, self.playback_text = job_id, text
+                    self.after_playback = 0
+                elif was_voiced and self.playback_id is not None:
+                    self.after_playback += c.frame_ms
         else:
             self.frames.append(frame)
             self.voiced += c.frame_ms if voiced else 0
+            if playback_id is None and voiced and self.playback_id is not None:
+                self.after_playback += c.frame_ms
         if playback_id is not None:
             self.playback_id = playback_id
+            self.after_playback = 0
             if playback_text and playback_text not in self.playback_text:
                 self.playback_text += ' ' + playback_text
         self.silence = 0 if voiced else self.silence + c.frame_ms
         limited = len(self.frames) * c.frame_ms >= c.max_utterance_ms
         if self.silence >= c.silence_ms or limited:
-            result = AudioUtterance(b''.join(self.frames), limited, self.playback_id, self.playback_text)
+            result = AudioUtterance(b''.join(self.frames), limited, self.playback_id, self.playback_text,
+                                    self.after_playback)
             enough_speech = self.voiced >= c.minimum_speech_ms
             self.reset()
             self.draining = limited

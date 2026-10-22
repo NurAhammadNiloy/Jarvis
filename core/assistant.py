@@ -85,15 +85,26 @@ class Assistant:
         decision = self.gate.assess(recognition, text=text,
                                     force_important=self.pending_reminder is not None)
         if self.dialogue is not None and decision.kind != 'stop' and not recognition.error and not recognition.truncated and text:
-            # Only new reminders need the dialogue's confirmation; list, delete
-            # and snooze run (or refuse) directly.
-            if self.dialogue.repairing or decision.kind == 'clarify' or route(text).intent in {'chat', 'create_reminder'}:
+            # A clear command takes the fast path even during a repair; only
+            # conversation, new reminders and unclear audio go to the dialogue.
+            intent = route(text).intent
+            if decision.kind == 'clarify' or intent in {'chat', 'create_reminder'}:
                 from dataclasses import replace
-                trigger = ('repair in progress' if self.dialogue.repairing else
-                           'unclear audio' if decision.kind == 'clarify' else 'conversation')
                 started = time.monotonic()
-                turn = self.dialogue.turn(replace(recognition, text=text), reason=(
-                    decision.prompt if decision.kind == 'clarify' else 'conversation'))
+                turn = None
+                if decision.reason == 'wording' and intent not in {'chat', 'create_reminder'}:
+                    # Alternatives differ only in wording ('call Mom' / 'call Mam'):
+                    # confirm the user's own words; no model call needed.
+                    trigger = 'similar alternatives'
+                    try:
+                        turn = self.dialogue.propose(text)
+                    except ValueError:
+                        turn = None
+                if turn is None:
+                    trigger = ('repair in progress' if self.dialogue.repairing else
+                               'unclear audio' if decision.kind == 'clarify' else 'conversation')
+                    turn = self.dialogue.turn(replace(recognition, text=text), reason=(
+                        decision.prompt if decision.kind == 'clarify' else 'conversation'))
                 dialogue_ms = round((time.monotonic() - started) * 1000)
                 self.active_conversation = True
                 self.last_active_time = self.clock()
@@ -114,6 +125,8 @@ class Assistant:
                        duration_ms=round((time.monotonic() - started) * 1000))
                 deliver_result(result, self.output)
                 return True
+            if decision.kind == 'accept' and (self.dialogue.pending or self.dialogue.repairing):
+                self.dialogue.clear()  # the new command supersedes the unfinished one
             self.dialogue.observe('user', text)
         record('voice_decision', decision=decision.kind, text=text,
                prompt=decision.prompt, playback_id=recognition.playback_id)

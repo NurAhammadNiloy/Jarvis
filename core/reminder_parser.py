@@ -52,8 +52,8 @@ class ReminderRequest:
 _PREFIX = re.compile(
     r"^\W*(?:(?:hey|ok|okay)\s+)?(?:jarvis\W+)?(?:(?:can|could|would|will)\s+you\s+|please\s+)*"
     r"(?:remind\s+(?:me|us)|(?:set|create|add|make)\s+(?:(?:a|an|another|new)\s+)*(?:reminder|alarm)"
-    r"|wake\s+me(?:\s+up)?)\b", re.IGNORECASE)
-_ALARM = re.compile(r"\balarms?\b|\bwake\s+me\b", re.IGNORECASE)
+    r"|wake\s+(?:me\s+)?up|wake\s+me)\b", re.IGNORECASE)
+_ALARM = re.compile(r"\balarms?\b|\bwake\s+(?:me|up)\b", re.IGNORECASE)
 
 _RECURRENCES = (
     ('weekly', re.compile(r"\b(?:every|each)\s+" + _WEEKDAY + r"s?\b|\bon\s+" + _WEEKDAY.replace('wd', 'wd2') + r"s\b", re.IGNORECASE)),
@@ -81,7 +81,7 @@ _DATES = (
     ('weekday', re.compile(r"\b(?:on\s+|next\s+|this\s+|coming\s+)?" + _WEEKDAY + r"\b", re.IGNORECASE)),
 )
 _PM_HINT = re.compile(r"\b(?:tonight|evening|afternoon|night)\b", re.IGNORECASE)
-_AM_HINT = re.compile(r"\b(?:morning|wake\s+me)\b", re.IGNORECASE)
+_AM_HINT = re.compile(r"\b(?:morning|wake\s+(?:me|up))\b", re.IGNORECASE)
 _PART_OF_DAY = re.compile(r"\b(?:in\s+the\s+|this\s+)?(?:morning|afternoon|evening)\b", re.IGNORECASE)
 _EDGE_WORDS = re.compile(r"^(?:(?:to|about|that|of|at|on|in|for|by|and|me)\b\W*)+|(?:\W*\b(?:to|about|at|on|in|for|by|and|from now))+\W*$",
                          re.IGNORECASE)
