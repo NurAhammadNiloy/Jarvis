@@ -106,6 +106,19 @@ PARSES = [
     ('remind me to drink water every hour', 'drink water', at(10, 22, 15), 'hourly', None, 'reminder'),
     ('Set an alarm for 7 AM every day', None, at(10, 23, 7), 'daily', None, 'alarm'),
     ('wake me up at 6:30', None, at(10, 23, 6, 30), 'none', None, 'alarm'),
+    # relative times, the same for alarms and reminders (22 Oct voice session)
+    ('set an alarm for 2 minutes from now', None, at(10, 22, 14, 2), 'none', None, 'alarm'),
+    ('set an alarm in 2 minutes', None, at(10, 22, 14, 2), 'none', None, 'alarm'),
+    ('set an alarm after 2 minutes', None, at(10, 22, 14, 2), 'none', None, 'alarm'),
+    ('set an alarm after 2 minutes from now on', None, at(10, 22, 14, 2), 'none', None, 'alarm'),
+    ('wake me up in ten minutes', None, at(10, 22, 14, 10), 'none', None, 'alarm'),
+    ('remind me to stretch 2 minutes from now', 'stretch', at(10, 22, 14, 2), 'none', None, 'reminder'),
+    ('remind me to stretch after 5 minutes', 'stretch', at(10, 22, 14, 5), 'none', None, 'reminder'),
+    # "for" is a time only for an alarm
+    ('set an alarm for 30 minutes', None, at(10, 22, 14, 30), 'none', None, 'alarm'),
+    ('set an alarm for 7', None, at(10, 23, 7), 'none', None, 'alarm'),
+    ('remind me to run for 30 minutes at 6 pm', 'run for 30 minutes', at(10, 22, 18), 'none', None, 'reminder'),
+    ('remind me to book a table for 4 at 7 pm', 'book a table for 4', at(10, 22, 19), 'none', None, 'reminder'),
 ]
 
 

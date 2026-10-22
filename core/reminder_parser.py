@@ -61,11 +61,19 @@ _RECURRENCES = (
     ('hourly', re.compile(r"\b(?:every|each)\s+hour\b|\bhourly\b", re.IGNORECASE)),
     ('weekly', re.compile(r"\b(?:every|each)\s+week\b|\bweekly\b", re.IGNORECASE)),
 )
-_RELATIVE = re.compile(
-    r"\bin\s+(?P<amount>\d+(?:\.\d+)?|an?|half\s+an?|a\s+couple\s+of|a\s+few|"
+_UNITS = r"seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?"
+_OFFSET = (
+    r"(?P<amount>\d+(?:\.\d+)?|an?|half\s+an?|a\s+couple\s+of|a\s+few|"
     r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?|"
     r"zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)"
-    r"\s+(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?)\b", re.IGNORECASE)
+    r"\s+(?P<unit>" + _UNITS + r")\b")
+# "in 2 minutes", "after 2 minutes (from now)", "2 minutes from now"; for an
+# alarm also "for 30 minutes" (a reminder to "run for 30 minutes" is its task).
+_RELATIVE = (
+    re.compile(r"\b(?:in|after)\s+" + _OFFSET + r"(?:\s+from\s+now\b)?", re.IGNORECASE),
+    re.compile(r"\b" + _OFFSET + r"\s+from\s+now\b", re.IGNORECASE),
+)
+_ALARM_RELATIVE = re.compile(r"\bfor\s+" + _OFFSET, re.IGNORECASE)
 _CLOCKS = (
     re.compile(r"\b(?:at\s+|for\s+|by\s+)?" + _HOUR + r"(?:[:.](?P<m>\d{2}))?\s*" + _MERIDIEM, re.IGNORECASE),
     re.compile(r"\b(?:at\s+|for\s+|by\s+)?(?P<h>\d{1,2}):(?P<m>\d{2})\b", re.IGNORECASE),
@@ -73,6 +81,9 @@ _CLOCKS = (
                r"(?:\s*" + _MERIDIEM + r")?", re.IGNORECASE),
     re.compile(r"\b(?:at\s+)?(?P<word>noon|midday|midnight)\b", re.IGNORECASE),
 )
+# An alarm "for 7" is a clock time; a reminder to "book a table for 4" is not.
+_ALARM_CLOCK = re.compile(r"\bfor\s+" + _HOUR + r"(?:\s+(?P<mw>o['’]?clock|fifteen|thirty|forty[\s-]five))?\b",
+                          re.IGNORECASE)
 _DATES = (
     ('day_after', re.compile(r"\b(?:the\s+)?day\s+after\s+tomorrow\b", re.IGNORECASE)),
     ('tomorrow', re.compile(r"\btomorrow\b", re.IGNORECASE)),
@@ -117,9 +128,9 @@ def _number(text):
     return float(_words_to_digits(text).replace(' ', ''))
 
 
-def _clock(text):
+def _clock(text, alarm=False):
     """(hour, minute, explicit_meridiem) or None. Hour is 0-23 only when explicit."""
-    for pattern in _CLOCKS:
+    for pattern in _CLOCKS + ((_ALARM_CLOCK,) if alarm else ()):
         match = text.take(pattern)
         if not match:
             continue
@@ -191,8 +202,12 @@ def parse_reminder(text, now):
             weekday = WEEKDAYS.index(day_name.lower()) if day_name else None
             break
 
-    relative = source.take(_RELATIVE)
-    clock = _clock(source)
+    relative = None
+    for pattern in _RELATIVE + ((_ALARM_RELATIVE,) if kind == 'alarm' else ()):
+        relative = source.take(pattern)
+        if relative:
+            break
+    clock = _clock(source, alarm=kind == 'alarm')
     date_kind, date_value = None, None
     for name, pattern in _DATES:
         match = source.take(pattern)

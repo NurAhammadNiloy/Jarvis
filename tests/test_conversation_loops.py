@@ -75,7 +75,6 @@ def asked_a_question(jarvis):
 
 # --- alarms with relative times -------------------------------------------------------
 
-@baseline
 def test_full_alarm_request_sets_the_alarm_without_a_question(jarvis):
     jarvis.hear(ALARM_FULL)
     assert jarvis.pending() == [('alarm', IN_TWO_MINUTES)]
@@ -83,7 +82,6 @@ def test_full_alarm_request_sets_the_alarm_without_a_question(jarvis):
     jarvis.resolver.assert_not_called()
 
 
-@baseline
 @pytest.mark.parametrize('answer', [TWO_MINUTES, AFTER_TWO_MINUTES])
 def test_time_answer_completes_the_alarm_instead_of_starting_a_new_request(jarvis, answer):
     jarvis.hear(SET_ALARM)
@@ -94,7 +92,6 @@ def test_time_answer_completes_the_alarm_instead_of_starting_a_new_request(jarvi
     jarvis.resolver.assert_not_called()
 
 
-@baseline
 def test_confirmed_proposal_executes_its_parsed_values_without_asking_again(jarvis):
     jarvis.resolver.return_value = ALARM_PROPOSAL
     jarvis.hear(AFTER_TWO_MINUTES_ON)  # idle: conversation, so the model proposes
@@ -136,7 +133,6 @@ def propose_then_unclear_answer(jarvis):
     jarvis.hear(heard('yes', 0.3))  # too weak to act on: asked again, still pending
 
 
-@baseline
 @pytest.mark.parametrize('setup', [propose_fresh, propose_during_repair, propose_then_unclear_answer])
 @pytest.mark.parametrize('answer', [YES_DO_IT, SHALL_I_YES, YES], ids=['yes do it', 'shall I do that yes', 'yes'])
 def test_yes_confirms_a_pending_proposal_in_any_state(jarvis, setup, answer):

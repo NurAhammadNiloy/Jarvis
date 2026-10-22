@@ -8,7 +8,7 @@ A confirmation holds the parsed Command, so "yes" executes exactly what was
 proposed and never parses it into another question. Answers here are decided
 by fixed rules; the model is never asked what "yes" or "stop" means.
 """
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import re
 import time
 from typing import Optional
@@ -61,7 +61,7 @@ def _says_yes(text):
     return bool(tokens & _AFFIRMATIONS) and not tokens & _NEGATIONS
 
 
-def answer_reliable(recognition, kind, prompt=''):
+def answer_reliable(recognition, kind, *prompts):
     """Short answers score low (Google gave 'yes' 0.56), so >= 0.5 is enough when no
     alternative contradicts it. An alternative that still says yes ('shall I do that
     yes do it') is no contradiction; 'no' or a yes-less guess is. From 0.8 up,
@@ -72,20 +72,22 @@ def answer_reliable(recognition, kind, prompt=''):
     for alternative in recognition.alternatives:
         if confidence >= 0.8 and alternative.confidence is not None and alternative.confidence < 0.5:
             continue
-        text = strip_echoed_prompt(alternative.text, prompt)
+        text = strip_echoed_prompt(alternative.text, *prompts)
         other = answer_kind(text)
         if other != kind and not (kind == 'yes' and other is None and _says_yes(text)):
             return False
     return True
 
 
-def strip_echoed_prompt(text, prompt):
+def strip_echoed_prompt(text, *prompts):
     """Drop the end of Jarvis's question when the microphone caught it in front of
     the answer: 'shall I do that yes' after '... Shall I do that?' -> 'yes'."""
-    heard, asked = words(text), words(prompt)
-    for size in range(min(len(heard) - 1, len(asked)), 1, -1):
-        if heard[:size] == asked[-size:]:
-            return ' '.join(heard[size:])
+    heard = words(text)
+    for prompt in prompts:
+        asked = words(prompt)
+        for size in range(min(len(heard) - 1, len(asked)), 1, -1):
+            if heard[:size] == asked[-size:]:
+                return ' '.join(heard[size:])
     return text
 
 
@@ -148,6 +150,9 @@ class AwaitingSlot:
 
 
 IDLE = Idle()
+# Asked again after an unclear yes/no. It must not contain "yes": the echo
+# filter drops a "yes" heard while Jarvis is saying "yes".
+REPROMPT = "Sorry, I didn't catch that. Should I go ahead?"
 
 
 @dataclass(frozen=True)
@@ -199,13 +204,10 @@ class ConversationState:
             return None
         if isinstance(state, AwaitingSlot):
             return Answer('fill', text=f'{state.query} {text}')
-        answer = strip_echoed_prompt(text, state.prompt)
+        answer = strip_echoed_prompt(text, state.prompt, REPROMPT)
         kind = answer_kind(answer)
-        if kind in ('yes', 'no') and not answer_reliable(recognition, kind, state.prompt):
-            # Never put "yes" in this prompt: the echo filter would drop your next "yes".
-            prompt = "Sorry, I didn't catch that. Should I go ahead?"
-            self._set(replace(state, prompt=prompt), 'asked again')
-            return Answer('reply', text=prompt)
+        if kind in ('yes', 'no') and not answer_reliable(recognition, kind, state.prompt, REPROMPT):
+            return Answer('reply', text=REPROMPT)
         if kind == 'yes':
             self.clear('confirmed')
             return Answer('execute', command=state.command)
