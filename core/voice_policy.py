@@ -1,5 +1,6 @@
 """Conservative decisions over provider transcripts. No audio or provider imports."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import itertools
 import re
 from typing import Optional, Tuple
 
@@ -22,6 +23,8 @@ class Recognition:
     playback_id: Optional[int] = None
     playback_text: str = ""
     captured_at: Optional[float] = None
+    # Identifies one heard utterance in the log (kept by dataclasses.replace).
+    uid: int = field(default_factory=itertools.count(1).__next__, compare=False)
 
 
 def words(text):

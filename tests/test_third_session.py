@@ -83,7 +83,6 @@ def jarvis(tmp_path):
 
 # --- low confidence without the wake word ---------------------------------------------
 
-@baseline
 @pytest.mark.parametrize('overheard', [PHONE, SUPERMAN], ids=['phone 0.33', 'Superman 0.13'])
 def test_weak_speech_without_wake_word_is_ignored_when_nothing_is_pending(jarvis, overheard):
     assert not jarvis.hear(overheard)  # active mode: no wake word needed, but 0.5 confidence is
@@ -155,7 +154,6 @@ def test_slot_answer_that_parses_is_accepted_at_0_5(jarvis):
 
 # --- the terminal --------------------------------------------------------------------------
 
-@baseline
 def test_reply_is_printed_on_the_line_of_the_utterance_that_caused_it(jarvis):
     # The listener logs the next (unrecognized) utterance before ChatGPT has answered.
     jarvis.resolver.return_value = {'reply': BANGLADESH_REPLY, 'query': None}
@@ -181,3 +179,68 @@ def test_reply_is_printed_on_the_line_of_the_utterance_that_caused_it(jarvis):
     noise = [line for line in lines if '(unrecognized)' in line]
     assert len(bangladesh) == 1 and bangladesh[0].endswith(f'Jarvis: "{BANGLADESH_REPLY}"')
     assert len(noise) == 1 and 'Jarvis:' not in noise[0] and noise[0].startswith('You (ignored')
+
+
+# --- active listening window -----------------------------------------------------------
+
+def window_assistant(now, speaking=lambda: False):
+    speech = Mock()
+    speech.is_speaking.side_effect = speaking
+    listener = Mock()
+    listener.is_capturing = False
+    assistant = Assistant(listener, speech, Mock(spec=CommandServices), Mock(), clock=lambda: now[0])
+    return assistant, listener
+
+
+def test_active_window_is_ten_seconds_from_settings():
+    from config import settings
+    assert settings.ACTIVE_WINDOW_SECONDS == 10
+    now = [0]
+    assistant, listener = window_assistant(now)
+    ticks = []
+
+    def listen(timeout):
+        ticks.append(now[0])
+        now[0] += 1
+    listener.listen.side_effect = listen
+    assistant.listen_for_command()
+    assert not assistant.active_conversation and ticks[-1] == 10
+    assert assistant.window_state() == 'passive'
+
+
+def test_window_starts_when_jarvis_stops_speaking_and_stays_open_while_waiting():
+    now = [0]
+    assistant, listener = window_assistant(now, speaking=lambda: now[0] < 30)
+    assistant.state.await_slot('alarm', 'time', 'set an alarm', 'What time should I set the alarm for?')
+    clears = {45: lambda: assistant.state.clear('test')}
+
+    def listen(timeout):
+        now[0] += 1
+        clears.get(now[0], lambda: None)()
+    listener.listen.side_effect = listen
+    assistant.listen_for_command()
+    assert now[0] == 55  # talking until 30, pending until 45 (last seen at 44), then the 10 s window
+
+
+def test_passive_mode_is_announced(capsys):
+    assistant, listener = window_assistant([0])
+    listener.listen.return_value = Recognition('Jarvis', 0.9)
+    assistant.wait_for_wake_word()
+    assert capsys.readouterr().out.splitlines()[0] == '[Passive mode]'
+
+
+def test_weak_speech_is_still_heard_while_an_answer_is_pending(jarvis):
+    jarvis.hear(SET_ALARM)
+    jarvis.hear(heard('in 2 minutes', 0.45))  # pending: not ignored, but too weak to set the alarm
+    assert jarvis.said()[-1] == "I'm not sure I heard that. What time should I set the alarm for?"
+
+
+def test_transcript_line_shows_the_window(jarvis):
+    lines = []
+    printer = LiveTranscript(out=lines.append)
+    conversation_log.add_listener(printer)
+    try:
+        jarvis.hear(SUPERMAN)
+    finally:
+        conversation_log.remove_listener(printer)
+    assert lines == ['You (ignored: low confidence, no wake word): "who won against Superman"  conf 0.13 | passive']

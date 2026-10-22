@@ -14,3 +14,7 @@ SHOW_TRANSCRIPTS = True
 # only speech starting with "Jarvis" or "stop" counts; the rest is discarded.
 # "headset": the microphone does not hear Jarvis.
 ECHO_MODE = "speakers"
+
+# After the wake word or a finished exchange (once Jarvis stops speaking), Jarvis
+# listens without the wake word for this long, then returns to passive mode.
+ACTIVE_WINDOW_SECONDS = 10

@@ -45,7 +45,8 @@ def test_recognition_decision_and_playback_are_distinguishable(tmp_path, monkeyp
     monkeypatch.setattr(conversation_log, '_log', conversation_log.ConversationLog(path))
     services = Mock(spec=CommandServices)
     speech = SpeechController(lambda text: PCMClip(b'\0\0', 16000), Mock())
-    recognition = Recognition("don't delete that", 0.2, (Hypothesis('delete that', 0.1),))
+    # 0.6: above the 0.5 needed without a wake word, still unsafe to act on
+    recognition = Recognition("don't delete that", 0.6, (Hypothesis('delete that', 0.55),))
     listener = ContinuousListener(Mock(), Mock(), lambda *a, **kw: recognition, speech)
     assistant = Assistant(listener, speech, services, speech.submit)
     try:
@@ -57,8 +58,8 @@ def test_recognition_decision_and_playback_are_distinguishable(tmp_path, monkeyp
     rows = entries(path)
     raw = next(row for row in rows if row['event'] == 'recognition')
     assert raw['text'] == recognition.text
-    assert raw['confidence'] == 0.2
-    assert raw['alternatives'] == [{'text': 'delete that', 'confidence': 0.1}]
+    assert raw['confidence'] == 0.6
+    assert raw['alternatives'] == [{'text': 'delete that', 'confidence': 0.55}]
     assert not raw['partial']
     assert next(row for row in rows if row['event'] == 'voice_decision')['decision'] == 'clarify'
     assert any(row['event'] == 'speech_queued' and row['role'] == 'jarvis' for row in rows)

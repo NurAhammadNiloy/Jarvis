@@ -175,7 +175,8 @@ def assistant_fixture(clock=lambda: 0):
 
 def test_assistant_does_not_execute_weak_or_conflicting_actions():
     assistant, services, output, _, _ = assistant_fixture()
-    assistant.process_recognition(Recognition('cancel all timers', 0.3))
+    assistant.process_recognition(Recognition('cancel all timers', 0.3))  # ignored: weak, no wake word
+    assistant.process_recognition(Recognition('cancel all timers', 0.6))  # asked to repeat
     assistant.process_recognition(Recognition('cancel all timers', 0.99, (Hypothesis("don't cancel all timers"),)))
     services.timer_action.assert_not_called()
     assert output.call_count == 2
@@ -218,7 +219,7 @@ def test_idle_timeout_runs_but_not_while_user_is_still_talking():
     assistant.listen_for_command()
     assert len(calls) == 2
     assert not assistant.active_conversation
-    output.assert_called_once()
+    output.assert_not_called()  # back to passive silently; wait_for_wake_word prints it
 
 
 def test_pending_time_answer_is_confidence_checked_before_execution():
@@ -296,7 +297,7 @@ def test_new_uncertain_request_cancels_old_output_before_clarification():
     order = []
     speech.stop.side_effect = lambda **kw: order.append('stop')
     output.side_effect = lambda text: order.append('clarify')
-    assistant.process_recognition(Recognition('cancel all timers', 0.2))
+    assistant.process_recognition(Recognition('cancel all timers', 0.6))
     assert order == ['stop', 'clarify']
 
 

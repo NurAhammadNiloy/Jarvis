@@ -41,6 +41,9 @@ DELETE_POLITE = heard('Jarvis can you delete my call Mom reminder', 0.82668012,
                       ('Yarvis can you delete my call Mom reminder', 0.82668012),
                       ('Jarvis can you delete my call mome reminder', 0.82668012))
 DEFINITION = heard('definition', 0.084044158, ('vision', 0.12234839), ('defination', 0.084044158))
+# The same misheard turn addressed to Jarvis: without the wake word, 0.08 is now ignored.
+ADDRESSED_DEFINITION = heard('Jarvis definition', 0.084044158, ('Jarvis vision', 0.12234839),
+                             ('Jarvis defination', 0.084044158))
 ALARM_OVER_JARVIS = heard('set an alarm for 6:30 a.m.', 0.87636822,
                           ('what do you want me to set an alarm for 6:30 a.m.', 0.68531543),
                           ('set an alarm for 6:30 tomorrow morning', 0.66481829))
@@ -136,7 +139,7 @@ def assistant_with_reminder(tmp_path):
 @pytest.mark.parametrize('command, answer', [(DELETE, YES), (DELETE, YES_DO_IT), (DELETE_POLITE, YES_PLEASE)])
 def test_logged_delete_is_confirmed_once_and_deletes(assistant_with_reminder, command, answer):
     assistant, reminders, resolver, output = assistant_with_reminder
-    assistant.process_recognition(DEFINITION)  # the misheard turn that started a repair
+    assistant.process_recognition(ADDRESSED_DEFINITION)  # the misheard turn that started a repair
     assert resolver.call_count == 1
     assistant.process_recognition(command)
     output.assert_called_with(f"I have: {command.text[len('Jarvis '):]}. Shall I do that?")
@@ -149,7 +152,7 @@ def test_logged_delete_is_confirmed_once_and_deletes(assistant_with_reminder, co
 
 def test_clear_command_during_a_repair_takes_the_fast_path(assistant_with_reminder):
     assistant, reminders, resolver, output = assistant_with_reminder
-    assistant.process_recognition(DEFINITION)
+    assistant.process_recognition(ADDRESSED_DEFINITION)
     assistant.process_recognition(Recognition('delete my call mom reminder', 0.95))
     output.assert_called_with('Deleted: call mom, today at 9:00 PM.')
     assert resolver.call_count == 1

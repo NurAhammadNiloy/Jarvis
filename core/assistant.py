@@ -38,8 +38,9 @@ class Assistant:
         self.clock = clock
         self.gate = ConfidenceGate(clock)
         self.state = ConversationState(clock)
+        from config.settings import ACTIVE_WINDOW_SECONDS
         self.active_conversation = False
-        self.conversation_timeout = 120
+        self.conversation_timeout = ACTIVE_WINDOW_SECONDS
         self.last_active_time = clock()
         self._recognition_failure_prompted = False
 
@@ -47,6 +48,24 @@ class Assistant:
         """Only final, accepted transcripts may reach execute_query."""
         if recognition is None:
             return False
+        record('turn_started', uid=recognition.uid, text=recognition.text,
+               confidence=recognition.confidence, error=recognition.error)
+        try:
+            return self._process(recognition, passive)
+        finally:
+            record('turn_finished', uid=recognition.uid, window=self.window_state())
+
+    def window_state(self):
+        """'active 10s' (time left to speak without the wake word) or 'passive'."""
+        if not self.active_conversation:
+            return 'passive'
+        if self.speech.is_speaking() or self.state.pending:
+            return f'active, {self.conversation_timeout:.0f}s after ' + (
+                'reply' if self.speech.is_speaking() else 'your answer')
+        left = self.conversation_timeout - (self.clock() - self.last_active_time)
+        return f'active {max(0, left):.0f}s'
+
+    def _process(self, recognition, passive):
         if recognition.error and recognition.error.startswith('microphone_'):
             raise RuntimeError('Microphone capture failed: ' + recognition.error)
         addressed = strip_wake_word(recognition.text)
@@ -97,6 +116,12 @@ class Assistant:
             record('voice_decision', decision='stop', text=text, playback_id=recognition.playback_id)
             self.speech.stop(expected_id=recognition.playback_id)
             return True
+        if (addressed is None and recognition.confidence is not None and recognition.confidence < 0.5
+                and not recognition.error and not self.state.pending):
+            # Active mode needs no wake word, but then weak, unaddressed speech is
+            # more likely a TV or another person than you (nothing is pending here).
+            record('voice_decision', decision='ignore', reason='weak_without_wake_word', text=text)
+            return False
         decision = self.gate.assess(recognition, text=text)
         if self.dialogue is not None and decision.kind != 'stop' and not recognition.error and not recognition.truncated and text:
             # A clear command takes the fast path; only conversation, requests
@@ -263,7 +288,7 @@ class Assistant:
     # --- loops ------------------------------------------------------------------
 
     def wait_for_wake_word(self):
-        print("[Passive mode - say 'Jarvis' to wake]")
+        print("[Passive mode]")
         while True:
             if self.process_recognition(self.listener.listen(timeout=1), passive=True):
                 return
@@ -273,10 +298,12 @@ class Assistant:
         self.last_active_time = self.clock()
         while self.active_conversation:
             self.process_recognition(self.listener.listen(timeout=1))
-            if (not self.speech.is_speaking() and not self.listener.is_capturing and
+            if self.speech.is_speaking() or self.state.pending:
+                # The window starts when Jarvis stops talking and nothing is awaited.
+                self.last_active_time = self.clock()
+            elif (not self.listener.is_capturing and
                     self.clock() - self.last_active_time > self.conversation_timeout):
-                self.active_conversation = False
-                self.output("I'm here whenever you need me. Just say 'Jarvis' to wake me up.")
+                self.active_conversation = False  # back to passive; wait_for_wake_word says so
 
     def close(self):
         self.speech.stop()

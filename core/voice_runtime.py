@@ -145,19 +145,19 @@ class ContinuousListener:
             if self.config.echo_mode == 'speakers' and (echo or not (addressed or is_stop(result.text))):
                 # Began while Jarvis was audible (or within 0.3 s after): only
                 # "Jarvis ..." or "stop" count. Keep what you said afterwards.
-                record('voice_filter', reason='speakers_mode', text=result.text)
+                record('voice_filter', reason='speakers_mode', text=result.text, uid=result.uid)
                 return self._after_playback(utterance)
             if echo:
-                record('voice_filter', reason='response_echo', text=result.text)
+                record('voice_filter', reason='response_echo', text=result.text, uid=result.uid)
                 return None
             if not addressed and not is_stop(result.text):
                 if result.text and utterance.voiced_after_playback_ms >= self.config.after_playback_speech_ms:
                     # Jarvis's echo opened the utterance, but you kept speaking
                     # after it stopped (e.g. answering "Shall I do that?").
                     record('voice_filter_passed', reason='spoke_after_playback', text=result.text,
-                           voiced_after_playback_ms=utterance.voiced_after_playback_ms)
+                           voiced_after_playback_ms=utterance.voiced_after_playback_ms, uid=result.uid)
                     return replace(result, playback_id=None, playback_text='')
-                record('voice_filter', reason='unaddressed_during_playback', text=result.text)
+                record('voice_filter', reason='unaddressed_during_playback', text=result.text, uid=result.uid)
                 # Mixed loudspeaker audio must not turn into an executable action.
                 return None
             if can_interrupt(result):
@@ -172,7 +172,7 @@ class ContinuousListener:
         result = self._transcribe(AudioUtterance(utterance.after_playback_pcm))
         if result.error or not result.text:
             return None
-        record('voice_filter_passed', reason='spoke_after_playback', text=result.text)
+        record('voice_filter_passed', reason='spoke_after_playback', text=result.text, uid=result.uid)
         return result
 
     def _recognize_final(self):

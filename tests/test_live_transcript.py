@@ -22,61 +22,103 @@ def feed(events):
     return lines
 
 
-def recognition(text, confidence=None, error=None):
-    return ('recognition', {'partial': False, 'text': text, 'confidence': confidence, 'error': error})
+def recognition(uid, text, confidence=None, error=None):
+    return ('recognition', {'uid': uid, 'partial': False, 'text': text, 'confidence': confidence, 'error': error})
 
 
-def test_fast_path_line_has_intent_path_and_timings():
+def started(uid):
+    return ('turn_started', {'uid': uid})
+
+
+def finished(uid, window='active 10s'):
+    return ('turn_finished', {'uid': uid, 'window': window})
+
+
+def test_fast_path_line_has_intent_path_window_and_timings():
     lines = feed([
         ('utterance_ended', {}),
         ('recognition_timing', {'partial': False, 'duration_ms': 900}),
-        recognition('delete my call mom reminder', 0.82), 0.9,
+        recognition(1, 'delete my call mom reminder', 0.82), 0.9,
+        started(1),
         ('voice_decision', {'decision': 'accept'}),
         ('command_result', {'intent': 'delete_reminder', 'status': 'handled'}),
-        ('speech_queued', {'playback_id': 4, 'text': 'Deleted: call mom, today at 9:00 PM.'}), 0.5,
+        ('speech_queued', {'playback_id': 4, 'text': 'Deleted: call mom, today at 9:00 PM.'}),
+        finished(1), 0.5,
         ('playback_chunk_started', {'playback_id': 4}),
     ])
     assert lines == ['You (heard): "delete my call mom reminder"  conf 0.82 | intent delete_reminder | fast path'
-                     ' | stt 0.9s, total 1.4s | Jarvis: "Deleted: call mom, today at 9:00 PM."']
+                     ' | active 10s | stt 0.9s, total 1.4s | Jarvis: "Deleted: call mom, today at 9:00 PM."']
 
 
 def test_rejected_and_ignored_audio_show_the_reason():
     lines = feed([
         ('recognition_timing', {'partial': False, 'duration_ms': 500}),
-        recognition('yes', 0.56),
-        ('voice_filter', {'reason': 'unaddressed_during_playback'}),
-        recognition('Deli', 0.06),
-        ('voice_decision', {'decision': 'ignore', 'reason': 'no_wake_word'}),
-        recognition('', error='unrecognized'),
-        ('voice_decision', {'decision': 'ignore', 'reason': 'repeated_unrecognized_audio'}),
+        recognition(1, 'yes', 0.56),
+        ('voice_filter', {'reason': 'unaddressed_during_playback', 'uid': 1}),
+        recognition(2, 'Deli', 0.06),
+        started(2), ('voice_decision', {'decision': 'ignore', 'reason': 'no_wake_word'}), finished(2, 'passive'),
+        recognition(3, '', error='unrecognized'),
+        started(3), ('voice_decision', {'decision': 'ignore', 'reason': 'repeated_unrecognized_audio'}),
+        finished(3, 'active 4s'),
+        recognition(4, 'hey Google set a timer', 0.55),
+        ('voice_filter', {'reason': 'speakers_mode', 'uid': 4}),
     ])
     assert lines == [
         'You (rejected: spoke over Jarvis without "Jarvis"): "yes"  conf 0.56 | stt 0.5s',
-        'You (ignored: no wake word): "Deli"  conf 0.06',
-        'You (ignored: unrecognized again): "(unrecognized)"  conf -',
+        'You (ignored: no wake word): "Deli"  conf 0.06 | passive',
+        'You (ignored: unrecognized again): "(unrecognized)"  conf - | active 4s',
+        'You (ignored: Jarvis speaking (speakers mode)): "hey Google set a timer"  conf 0.55',
     ]
 
 
 def test_dialogue_path_shows_why_the_model_was_used():
     lines = feed([
         ('utterance_ended', {}),
-        recognition('Jarvis delete my call Mom reminder', 0.87), 0.8,
-        ('dialogue_turn', {'reply': 'Shall I?', 'confirmed_query': '', 'duration_ms': 800,
-                           'model_called': True, 'trigger': 'repair in progress'}),
-        ('speech_queued', {'playback_id': 5, 'text': 'Shall I?'}), 0.5,
+        recognition(1, 'Jarvis delete my call Mom reminder', 0.87), 0.8,
+        started(1),
+        ('dialogue_turn', {'reply': 'Shall I?', 'duration_ms': 800, 'model_called': True,
+                           'trigger': 'similar alternatives'}),
+        ('speech_queued', {'playback_id': 5, 'text': 'Shall I?'}),
+        finished(1), 0.5,
         ('playback_chunk_started', {'playback_id': 5}),
     ])
     assert lines == ['You (heard): "Jarvis delete my call Mom reminder"  conf 0.87 | intent delete_reminder'
-                     ' | ChatGPT dialogue (repair in progress) | model 0.8s, total 1.3s | Jarvis: "Shall I?"']
+                     ' | ChatGPT dialogue (similar alternatives) | active 10s | model 0.8s, total 1.3s'
+                     ' | Jarvis: "Shall I?"']
 
 
-def test_partials_are_not_shown_and_a_new_turn_flushes_the_old_one():
+def test_reply_goes_to_its_own_utterance_even_when_the_next_was_heard_first():
     lines = feed([
-        ('recognition', {'partial': True, 'text': 'del', 'confidence': None}),
-        recognition('what time is it', 0.9),
-        recognition('thanks', 0.9),
+        recognition(1, 'Jarvis tell me about Finland', 0.95),
+        recognition(2, '', error='unrecognized'),    # heard while ChatGPT is thinking
+        started(1),
+        ('dialogue_turn', {'reply': 'Finland is a Nordic country.', 'duration_ms': 900, 'model_called': True}),
+        ('speech_queued', {'playback_id': 7, 'text': 'Finland is a Nordic country.'}),
+        ('playback_chunk_started', {'playback_id': 7}),  # may start before the turn ends
+        finished(1),
+        started(2), ('voice_decision', {'decision': 'ignore', 'reason': 'unrecognized_nothing_pending'}),
+        finished(2),
     ])
-    assert [line.split(' | ')[0] for line in lines] == ['You (heard): "what time is it"  conf 0.90']
+    assert lines[0].startswith('You (heard): "Jarvis tell me about Finland"')
+    assert lines[0].endswith('Jarvis: "Finland is a Nordic country."')
+    assert lines[1] == 'You (ignored: unrecognized, nothing pending): "(unrecognized)"  conf - | active 10s'
+
+
+def test_partials_are_not_shown_and_an_utterance_never_handled_is_reported():
+    lines = feed([
+        ('recognition', {'partial': True, 'text': 'del', 'confidence': None, 'uid': 9}),
+        recognition(1, 'what time is it', 0.9),     # dropped: the queue moved on
+        recognition(2, 'thanks', 0.9),
+        started(2), ('command_result', {'intent': 'thank'}), finished(2),
+    ])
+    assert lines[0] == 'You (ignored: not processed (arrived too late)): "what time is it"  conf 0.90'
+    assert lines[1].startswith('You (heard): "thanks"')
+    assert len(lines) == 2
+
+
+def test_replies_nobody_asked_for_get_their_own_line():
+    lines = feed([('speech_queued', {'playback_id': 3, 'text': 'Sir, this is your reminder: stretch.'})])
+    assert lines == ['Jarvis: Sir, this is your reminder: stretch.']
 
 
 def test_listener_receives_events_without_a_log_file_and_errors_are_contained():
@@ -104,14 +146,16 @@ def test_setting_turns_transcripts_off(monkeypatch):
 
 def test_answers_to_a_pending_state_show_what_they_answered():
     lines = feed([
-        recognition('2 minutes from now', 0.94),
+        recognition(1, '2 minutes from now', 0.94), started(1),
         ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'fill'}),
         ('command_result', {'intent': 'alarm', 'status': 'handled'}),
         ('speech_queued', {'playback_id': 2, 'text': 'Alarm set for today at 10:38 AM.'}),
+        finished(1),
         ('playback_chunk_started', {'playback_id': 2}),
-        recognition('Jarvis stop', 0.73),
+        recognition(2, 'Jarvis stop', 0.73), started(2),
         ('pending_answer', {'state': 'awaiting time for alarm', 'answer': 'cancel'}),
         ('speech_queued', {'playback_id': 3, 'text': 'Cancelled.'}),
+        finished(2),
         ('playback_chunk_started', {'playback_id': 3}),
     ])
     assert lines[0].startswith('You (heard): "2 minutes from now"  conf 0.94 | intent alarm'

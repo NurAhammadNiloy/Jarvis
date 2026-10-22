@@ -43,7 +43,9 @@ JARVIS_STOP = heard('Jarvis stop', 0.72958487, ('Jarvis stopped', 0.72958487),  
                     ('Jarvis stahp', 0.72958487), ('Yarvis stop', 0.72958487), ('Jarvis stoppe', 0.72958487))
 STOP = heard('stop', 0.91)
 NOISE = Recognition(error='unrecognized')                                                 # 138, 177, 442
-DEFINITION = heard('definition', 0.084044158, ('vision', 0.12234839), ('defination', 0.084044158))
+# Addressed to Jarvis (an unaddressed 0.08 is ignored since the active-window rule).
+DEFINITION = heard('Jarvis definition', 0.084044158, ('Jarvis vision', 0.12234839),
+                   ('Jarvis defination', 0.084044158))
 
 TZ = ZoneInfo('Europe/Helsinki')
 NOW = datetime(2026, 10, 22, 10, 36, 9, tzinfo=TZ)
